@@ -4,27 +4,66 @@
 !.env.example
 *.key
 *.pem
+*.p12
+*.pfx
+*.crt
+*.cer
 
-# Proprietary/downloaded dependencies
+# Proprietary and downloaded dependencies
 *.whl
 *.tar
 *.tar.gz
+*.zip
 
-# Python
+# Python cache and environments
 __pycache__/
 *.py[cod]
+*$py.class
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 .venv/
 venv/
+env/
 
-# IRIS temporary and generated files
+# Generated results and runtime data
+output/
+outputs/
+results/
+coverage/
 *.log
 *.tmp
+*.bak
+*.swp
+
+# IRIS generated and temporary files
+iris.cpf
+messages.log
+console.log
+*.lck
+
+# Docker overrides and local state
+docker-compose.override.yml
+compose.override.yml
 
 # Editors
 .vscode/
 .idea/
+*.code-workspace
 
 # Windows
 Thumbs.db
 Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.nfs*
