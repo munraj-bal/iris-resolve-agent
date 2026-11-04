@@ -5,6 +5,7 @@ services:
     container_name: iris-ai-hub
     environment:
       IRIS_PASSWORD: "${IRIS_PASSWORD}"
+      CCR_PROVIDER: "${CCR_PROVIDER:-synthetic}"
     ports:
       - "9091:1972"
       - "9092:52773"
