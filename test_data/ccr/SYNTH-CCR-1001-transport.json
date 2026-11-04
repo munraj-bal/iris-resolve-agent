@@ -1,0 +1,23 @@
+{
+  "ccr_id": "SYNTH-CCR-1001",
+  "transport_logs": [
+    {
+      "evidence_id": "SYNTH-CCR-1001-LOG-001",
+      "timestamp": "2026-10-21T15:10:00Z",
+      "level": "INFO",
+      "status": "Completed",
+      "item_set_id": "ITEM-001",
+      "message": "Cancellation routing configuration transported successfully.",
+      "target_environment": "TEST"
+    },
+    {
+      "evidence_id": "SYNTH-CCR-1001-LOG-002",
+      "timestamp": "2026-10-21T15:12:00Z",
+      "level": "WARNING",
+      "status": "Pending",
+      "item_set_id": "ITEM-002",
+      "message": "Outbound message configuration remained pending.",
+      "target_environment": "TEST"
+    }
+  ]
+}

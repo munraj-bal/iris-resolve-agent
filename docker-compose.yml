@@ -10,4 +10,4 @@ services:
       - "9092:52773"
     volumes:
       - ./src:/opt/irisapp/src
-      - ./test_payloads:/opt/irisapp/test_payloads
+      - ./test_data:/opt/irisapp/test_data:ro
