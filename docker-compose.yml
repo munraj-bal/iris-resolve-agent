@@ -1,0 +1,13 @@
+services:
+  iris:
+    image: docker.iscinternal.com/docker-intersystems/intersystems/iris-community:2027.1.0AI.109.0
+    pull_policy: never
+    container_name: iris-ai-hub
+    environment:
+      IRIS_PASSWORD: "${IRIS_PASSWORD}"
+    ports:
+      - "9091:1972"
+      - "9092:52773"
+    volumes:
+      - ./src:/opt/irisapp/src
+      - ./test_payloads:/opt/irisapp/test_payloads
