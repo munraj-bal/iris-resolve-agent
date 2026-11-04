@@ -1,6 +1,72 @@
 # AutoSchema AI Agent
 
-AutoSchema is an InterSystems IRIS Interoperability agent that validates incoming order JSON, repairs compatible schema differences with an AI agent, quarantines incomplete payloads, rejects invalid payloads, and stores each decision in IRIS with an explanation.
+AutoSchema is an AI-assisted schema validation and repair application built on InterSystems IRIS. The core agent is implemented as an `Ens.BusinessProcess` and uses IRIS AI Hub model configuration, MCP tools, Embedded Python, AWS Bedrock, and IRIS persistence.
+
+Incoming order JSON is validated against a strict target schema. Compatible payloads can be repaired automatically, incomplete payloads are quarantined for review, and malformed or unsafe payloads are rejected. Each decision, explanation, original payload, and safely mapped values are stored in IRIS.
+
+> **Current implementation status:** The agent logic can be tested directly through `AutoSchema.AgentProcess.RunAgent()`. The `Ens.BusinessProcess` and `OnRequest()` entry point are implemented, but a configured IRIS Interoperability production and end-to-end message trace are still required for the final competition workflow.
+
+## Contents
+
+- [Architecture](#architecture)
+- [Decision paths](#decision-paths)
+- [Target order schema](#target-order-schema)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Testing](#testing)
+- [Viewing saved records](#viewing-saved-records)
+- [MCP transport workaround](#mcp-transport-workaround)
+- [Troubleshooting](#troubleshooting)
+- [Rebuild warning](#rebuild-warning)
+- [Security](#security)
+- [Current development limitations](#current-development-limitations)
+
+## Architecture
+
+The current processing flow is:
+
+```text
+Incoming order JSON
+        |
+        v
+Strict deterministic validation
+        |
+        +-----------------------------+
+        | Valid                       | Invalid or non-standard
+        v                             v
+Save as VALIDATED             Load model configuration
+                              from IRIS AI Hub
+                                      |
+                                      v
+                              Start schema MCP server
+                                      |
+                                      v
+                              Agent calls schema tools
+                                      |
+                                      v
+                         AUTO_HEAL / QUARANTINE / REJECT
+                                      |
+                                      v
+                         Deterministic safety validation
+                                      |
+                                      v
+                         Save decision and explanation
+                                  in IRIS
+```
+
+The main components are:
+
+| Component | Purpose |
+|---|---|
+| `AutoSchema.AgentProcess` | IRIS business process and Embedded Python entry point |
+| `AutoSchema.PayloadMsg` | Interoperability request carrying the raw JSON payload |
+| `AutoSchema.OrderRecord` | Persistent IRIS record containing the decision and mapped fields |
+| `AutoSchema.Setup` | Wallet and AI Hub Config Store initialisation |
+| `autoschema_agent.py` | Validation, AI invocation, safety checks, and persistence logic |
+| `schema_mcp_server.py` | MCP tools for schema discovery and amount conversion |
+| AWS Bedrock | Hosts the Claude model used by the agent |
+| IRIS AI Hub Config Store | Stores and supplies the model configuration |
+| IRIS Wallet | Stores the Bedrock credential securely |
 
 ## Decision paths
 
@@ -8,14 +74,50 @@ AutoSchema supports four outcomes:
 
 | Status | Description |
 |---|---|
-| `VALIDATED` | The payload already matches the strict target schema. |
-| `AUTO_HEALED` | The AI agent safely mapped and converted the payload. |
-| `QUARANTINED` | Required information is missing, ambiguous, or unsafe to infer. |
+| `VALIDATED` | The payload already matches the strict target schema. No model call is required. |
+| `AUTO_HEALED` | The agent safely mapped and converted all required fields with at least `0.85` confidence. |
+| `QUARANTINED` | Required information is missing, ambiguous, or unsafe to infer. Safely mapped fields are retained. |
 | `REJECTED` | The payload is malformed or contains an instruction-injection attempt. |
+
+An `AUTO_HEAL` decision is accepted only when:
+
+1. The returned confidence is a numeric value from `0` to `1`.
+2. The confidence is at least `0.85`.
+3. The healed payload passes the strict deterministic schema validator.
+4. All four required fields are present.
+5. `OrderTotalCents` is an integer.
+6. `CustomerEmail` contains `@`.
+7. `Currency` is a three-letter uppercase value.
+
+If any of these checks fail, the application changes the decision to `QUARANTINE`.
+
+## Target order schema
+
+The target schema is:
+
+```json
+{
+  "OrderID": "String, required",
+  "CustomerEmail": "String containing @, required",
+  "OrderTotalCents": "Integer amount in cents, required",
+  "Currency": "Three-letter uppercase currency code, required"
+}
+```
+
+Example valid payload:
+
+```json
+{
+  "OrderID": "ORD-1001",
+  "CustomerEmail": "customer@example.com",
+  "OrderTotalCents": 14999,
+  "Currency": "USD"
+}
+```
 
 ## Prerequisites
 
-Install the following before starting:
+Install or obtain the following:
 
 - Docker Desktop using Linux containers
 - Git
@@ -24,16 +126,18 @@ Install the following before starting:
 - Access to the required Amazon Bedrock model
 - The `langchain_intersystems` wheel from the InterSystems AI Hub Early Access portal
 
-## 1. Clone the repository
+> This repository was developed against AI Hub EAP build `2027.1.0AI.109.0`, which was the build available from the EAP portal at development time. Confirm that this build is accepted for the competition before final submission.
+
+## Installation
+
+### 1. Clone the repository
 
 ```cmd
-git clone YOUR_REPOSITORY_URL
+git clone https://github.com/munraj-bal/iris-autoschema-agent.git
 cd iris-autoschema-agent
 ```
 
-Replace `YOUR_REPOSITORY_URL` with the URL of this repository.
-
-## 2. Download the IRIS AI Hub Docker image
+### 2. Download the IRIS AI Hub Docker image
 
 Download the x64 Community Docker image from the InterSystems AI Hub Early Access portal.
 
@@ -43,7 +147,7 @@ This project was developed using:
 iris-community-2027.1.0AI.109.0-docker.tar.gz
 ```
 
-Save the archive somewhere outside the Git repository, for example:
+Save the archive outside the Git repository, for example:
 
 ```text
 C:\Users\your-user\Documents\iris_images\
@@ -67,21 +171,25 @@ Confirm that the image is available:
 docker images
 ```
 
-## 3. Download the InterSystems LangChain wheel
+### 3. Download the InterSystems LangChain wheel
 
-Download the following wheel from the InterSystems AI Hub Early Access portal:
+Download:
 
 ```text
 langchain_intersystems-0.0.1-py3-none-any.whl
 ```
 
-Place the wheel in:
+from the InterSystems AI Hub Early Access portal.
+
+Place it in:
 
 ```text
 src\python\langchain_intersystems-0.0.1-py3-none-any.whl
 ```
 
-The expected project structure is:
+> The wheel is excluded from Git because it is distributed through the InterSystems AI Hub Early Access Program. Each user must download it independently and place it in `src/python`.
+
+The expected local project structure is:
 
 ```text
 iris-autoschema-agent\
@@ -89,61 +197,55 @@ iris-autoschema-agent\
 ├── .env.example
 ├── .gitignore
 ├── docker-compose.yml
+├── LICENSE
 ├── README.md
 ├── src\
 │   ├── AutoSchema\
 │   │   ├── AgentProcess.cls
 │   │   ├── OrderRecord.cls
 │   │   ├── PayloadMsg.cls
-│   │   └── setup.cls
+│   │   └── Setup.cls
 │   └── python\
 │       ├── autoschema_agent.py
 │       ├── schema_mcp_server.py
 │       └── langchain_intersystems-0.0.1-py3-none-any.whl
 └── test_payloads\
+    └── .gitkeep
 ```
 
-## 4. Configure the local IRIS password
+The wheel, `.env`, and Python cache files are present locally but excluded from Git.
 
-Create a file named `.env` in the same directory as `docker-compose.yml`.
+### 4. Configure the local IRIS password
 
-```env
-IRIS_PASSWORD=replace_with_your_actual_IRIS_password
-```
-
-Replace the placeholder with the password that will be assigned to the local IRIS `_SYSTEM` account.
-
-For example:
-
-```env
-IRIS_PASSWORD=your_private_local_password
-```
-
-Do not use the following literal placeholder as the password:
-
-```env
-IRIS_PASSWORD=YOUR_CURRENT_IRIS_PASSWORD
-```
-
-The password must not be committed to Git.
-
-Add this entry to `.gitignore`:
-
-```gitignore
-.env
-```
-
-Create a safe `.env.example` file that can be committed:
+Create a file named `.env` in the same directory as `docker-compose.yml`:
 
 ```env
 IRIS_PASSWORD=replace_with_your_local_IRIS_password
 ```
 
-The actual `.env` file must remain private.
+Replace the placeholder with the password that will be assigned to the local IRIS `_SYSTEM` account.
 
-## 5. Configure Docker Compose
+Do not include quotes around the password unless the value specifically requires them.
 
-Use the following `docker-compose.yml`:
+Do not commit `.env`.
+
+The repository contains a safe `.env.example` file:
+
+```env
+IRIS_PASSWORD=replace_with_your_local_IRIS_password
+```
+
+The `.gitignore` file must contain:
+
+```gitignore
+.env
+.env.*
+!.env.example
+```
+
+### 5. Review Docker Compose
+
+The supplied `docker-compose.yml` contains:
 
 ```yaml
 services:
@@ -165,12 +267,20 @@ The mapped ports are:
 
 | Local port | Container port | Purpose |
 |---|---:|---|
-| `9091` | `1972` | IRIS database connection |
-| `9092` | `52773` | System Management Portal |
+| `9091` | `1972` | IRIS database connection from the Windows host |
+| `9092` | `52773` | IRIS System Management Portal |
 
-## 6. Start the container
+Python executing inside the container connects to IRIS through:
 
-From the repository directory, run:
+```text
+localhost:1972
+```
+
+The mapped port `9091` is only required when connecting from the Windows host.
+
+### 6. Start the container
+
+From the repository directory:
 
 ```cmd
 docker compose up -d
@@ -188,7 +298,7 @@ The expected status is:
 Up ... (healthy)
 ```
 
-Confirm that `IRIS_PASSWORD` was supplied to the container without displaying its value:
+Confirm that `IRIS_PASSWORD` was supplied without displaying its value:
 
 ```cmd
 docker exec iris-ai-hub python3 -c "import os; print('IRIS_PASSWORD set:', bool(os.getenv('IRIS_PASSWORD')))"
@@ -200,9 +310,9 @@ Expected output:
 IRIS_PASSWORD set: True
 ```
 
-## 7. Set the IRIS `_SYSTEM` password
+### 7. Set the IRIS `_SYSTEM` password
 
-Open the System Management Portal:
+Open the IRIS System Management Portal:
 
 ```text
 http://localhost:9092/csp/sys/UtilHome.csp
@@ -217,19 +327,20 @@ Password: SYS
 
 IRIS should request a password change.
 
-Set the new `_SYSTEM` password to the exact same value stored in:
+Set the new `_SYSTEM` password to the exact same value stored in `.env`.
+
+The `.env` environment variable does not automatically change the IRIS user account password. The following two values must match:
 
 ```text
-.env
+IRIS _SYSTEM password
+IRIS_PASSWORD value in .env
 ```
 
-The `.env` variable does not automatically change the IRIS user account password. The `_SYSTEM` password in IRIS and the `IRIS_PASSWORD` value in `.env` must match.
+Do not include the real password in documentation, source code, screenshots, support messages, or Git commits.
 
-Do not include the real password in documentation, screenshots, source code, or Git commits.
+### 8. Install the Python dependencies
 
-## 8. Install the Python dependencies
-
-Run the following command from Windows Command Prompt:
+Run from Windows Command Prompt:
 
 ```cmd
 docker exec -u root iris-ai-hub python3 -m pip install --target /usr/irissys/mgr/python langchain langchain-aws
@@ -243,11 +354,13 @@ docker exec -u root iris-ai-hub python3 -m pip install --target /usr/irissys/mgr
 
 The warning about running `pip` as root is expected in this development container.
 
-Warnings that a target directory already exists can occur when dependencies overlap. These warnings do not necessarily indicate that the installation failed. Check for the final `Successfully installed` message.
+Warnings that target directories already exist may appear because the InterSystems wheel installs dependencies that overlap with the first command. Check that the installation finishes with:
 
-## 9. Open the IRIS terminal
+```text
+Successfully installed
+```
 
-Run:
+### 9. Open the IRIS terminal
 
 ```cmd
 docker exec -it iris-ai-hub iris session iris
@@ -259,39 +372,21 @@ The terminal should open in the `USER` namespace:
 USER>
 ```
 
-If the prompt is in a different namespace, switch to `USER`:
+If the prompt is in a different namespace:
 
 ```objectscript
 ZN "USER"
 ```
 
-## 10. Import and compile the project classes
+### 10. Import and compile the project classes
 
-At the `USER>` prompt, run:
+At the `USER>` prompt:
 
 ```objectscript
 Do $SYSTEM.OBJ.LoadDir("/opt/irisapp/src/AutoSchema","ck")
 ```
 
-The output should finish with:
-
-```text
-Load finished successfully.
-```
-
-Confirm that the agent class exists:
-
-```objectscript
-Write ##class(%Dictionary.ClassDefinition).%ExistsId("AutoSchema.AgentProcess")
-```
-
-Expected output:
-
-```text
-1
-```
-
-## 11. Rebuild the AI Hub Config Store registry
+The output11. Rebuild the AI Hub Config Store registry
 
 Run:
 
@@ -314,9 +409,9 @@ Expected output:
 Descriptor: %AI.ConfigStore.LLMDescriptor
 ```
 
-## 12. Configure AWS Bedrock and the MCP tools
+### 12. Configure AWS Bedrock and the MCP tools
 
-Run the setup method with a valid AWS Bedrock API key:
+Run the setup method using a valid AWS Bedrock API key:
 
 ```objectscript
 Set sc = ##class(AutoSchema.Setup).Init("YOUR_BEDROCK_API_KEY")
@@ -329,8 +424,8 @@ Never include the real Bedrock API key in:
 
 - `README.md`
 - `.env.example`
-- ObjectScript source files
-- Python source files
+- ObjectScript source
+- Python source
 - Git commits
 - screenshots
 - support messages
@@ -342,7 +437,29 @@ A successful setup displays:
 AWS Bedrock Claude & Config Store initialised successfully!
 ```
 
-### Existing Wallet credential
+The current setup creates:
+
+```text
+AI.LLM.claude_single
+AI.MCP.schema_tools
+```
+
+The model configuration uses:
+
+```text
+Provider: bedrock_converse
+Region: eu-west-2
+```
+
+The configured model identifier is:
+
+```text
+eu.anthropic.claude-sonnet-5-5
+```
+
+Model availability depends on the AWS account, region, and enabled Bedrock model access.
+
+#### Existing Wallet credential
 
 If setup reports that `SingleKeyAuth.claude` already exists, delete only the existing Wallet credential:
 
@@ -353,16 +470,20 @@ Do $SYSTEM.Status.DisplayError(sc)
 ZN "USER"
 ```
 
-Run setup again using the replacement Bedrock API key:
+Run setup again:
 
 ```objectscript
 Set sc = ##class(AutoSchema.Setup).Init("YOUR_BEDROCK_API_KEY")
 Do $SYSTEM.Status.DisplayError(sc)
 ```
 
-## 13. Run the test payloads
+## Testing
 
-### Strictly valid payload
+The following tests call the agent helper directly. They verify the validation, model, MCP tool, safety, and persistence logic.
+
+They do not yet demonstrate processing through a running Interoperability production.
+
+### Test 1: strictly valid payload
 
 This payload already matches the target schema and does not require an AI call:
 
@@ -386,7 +507,7 @@ Currency: USD
 Status: VALIDATED
 ```
 
-### Auto-healed payload
+### Test 2: auto-healed payload
 
 This payload uses alternative field names and provides the amount in dollars:
 
@@ -412,14 +533,16 @@ Status: AUTO_HEALED
 
 The agent should:
 
-1. Map `client_ref` to `OrderID`.
-2. Map `buyer_contact` to `CustomerEmail`.
-3. Call `convert_dollars_to_cents()`.
-4. Convert `129.99` dollars to `12999` cents.
-5. Provide an explanation and confidence score.
-6. Save the repaired payload in IRIS.
+1. Call `get_target_schema()`.
+2. Map `client_ref` to `OrderID`.
+3. Map `buyer_contact` to `CustomerEmail`.
+4. Call `convert_dollars_to_cents()`.
+5. Convert `129.99` dollars to `12999` cents.
+6. Return a confidence score.
+7. Pass the healed payload through strict deterministic validation.
+8. Save the repaired payload in IRIS.
 
-### Quarantined payload
+### Test 3: quarantined payload
 
 This payload is missing the required customer email:
 
@@ -443,9 +566,9 @@ Currency: USD
 Status: QUARANTINED
 ```
 
-The agent must not invent a customer email. Safely mapped fields should still be retained.
+The agent must not invent a customer email. Fields that can be mapped safely should still be retained.
 
-### Rejected malformed JSON
+### Test 4: rejected malformed JSON
 
 The following input intentionally contains invalid JSON:
 
@@ -465,9 +588,11 @@ Expected reasoning:
 Invalid JSON syntax
 ```
 
-## 14. View saved records in IRIS
+Malformed JSON is rejected before any model call.
 
-Open the System Management Portal:
+## Viewing saved records
+
+Open the IRIS System Management Portal:
 
 ```text
 http://localhost:9092/csp/sys/UtilHome.csp
@@ -476,7 +601,7 @@ http://localhost:9092/csp/sys/UtilHome.csp
 Select the `USER` namespace and go to:
 
 ```text
-System Explorer → SQL
+System Explorer > SQL
 ```
 
 Run:
@@ -497,13 +622,162 @@ ORDER BY ID DESC
 
 The query displays:
 
-- the mapped order fields
-- the final decision status
-- the agent's explanation
-- the original payload
-- the converted amount in cents
+- mapped order fields
+- final decision status
+- agent explanation
+- confidence score
+- original payload
+- converted amount in cents
 
-## 15. Updating Python code
+## MCP transport workaround
+
+The model configuration is loaded from the IRIS AI Hub Config Store through:
+
+```python
+init_chat_model(llm_config_name, conn)
+```
+
+The schema MCP server is currently started explicitly from Embedded Python using:
+
+```python
+StdioServerParameters
+stdio_client
+ClientSession
+load_mcp_tools
+```
+
+This works around a stdio compatibility issue encountered in Embedded Python. The MCP client attempted to call `fileno()` on IRIS's redirected output stream:
+
+```text
+AttributeError: 'iris.Stdout' object has no attribute 'fileno'
+```
+
+The workaround supplies a real stderr log file when starting the MCP subprocess:
+
+```text
+/tmp/autoschema-mcp-stderr.log
+```
+
+The MCP tools remain active and callable by the agent.
+
+The `AI.MCP.schema_tools` Config Store entry is created by the setup class for AI Hub configuration completeness, but the current runtime launches `schema_mcp_server.py` explicitly because of this transport issue.
+
+## Troubleshooting
+
+### View the MCP error log
+
+From Windows Command Prompt:
+
+```cmd
+docker exec iris-ai-hub cat /tmp/autoschema-mcp-stderr.log
+```
+
+An empty log can indicate that no MCP subprocess errors have occurred.
+
+### `CLASS DOES NOT EXIST`
+
+Example:
+
+```text
+<CLASS DOES NOT EXIST> *AutoSchema.AgentProcess
+```
+
+Import and compile the classes:
+
+```objectscript
+Do $SYSTEM.OBJ.LoadDir("/opt/irisapp/src/AutoSchema","ck")
+```
+
+### `No descriptor found for AI.LLM`
+
+Run:
+
+```objectscript
+Do ##class(%ConfigStore.DescriptorManager).RebuildRegistry()
+```
+
+Then rerun `AutoSchema.Setup.Init(...)`.
+
+### `Object to Load not found` for `AI.LLM.claude_single`
+
+The model configuration has not been created successfully.
+
+Run:
+
+```objectscript
+Set sc = ##class(AutoSchema.Setup).Init("YOUR_BEDROCK_API_KEY")
+Do $SYSTEM.Status.DisplayError(sc)
+```
+
+### Wallet key already exists
+
+Example:
+
+```text
+ID key not unique for extent '%Wallet.LocalStorage'
+```
+
+Delete only the existing Wallet key:
+
+```objectscript
+ZN "%SYS"
+Set sc = ##class(%Wallet.KeyValue).Delete("SingleKeyAuth.claude")
+Do $SYSTEM.Status.DisplayError(sc)
+ZN "USER"
+```
+
+Then rerun setup.
+
+### `Access Denied` from `iris.connect()`
+
+Confirm that:
+
+1. `IRIS_PASSWORD` exists in the container.
+2. The value in `.env` matches the current IRIS `_SYSTEM` password.
+3. The container was started after the `.env` file was created.
+4. The `_SYSTEM` password was changed from `SYS` in SMP.
+
+Check only whether the variable exists:
+
+```cmd
+docker exec iris-ai-hub python3 -c "import os; print('IRIS_PASSWORD set:', bool(os.getenv('IRIS_PASSWORD')))"
+```
+
+Do not print the password value.
+
+### `No module named langchain`
+
+Install:
+
+```cmd
+docker exec -u root iris-ai-hub python3 -m pip install --target /usr/irissys/mgr/python langchain langchain-aws
+```
+
+### `No module named langchain_intersystems`
+
+Install the EAP wheel:
+
+```cmd
+docker exec -u root iris-ai-hub python3 -m pip install --target /usr/irissys/mgr/python /opt/irisapp/src/python/langchain_intersystems-0.0.1-py3-none-any.whl
+```
+
+### Technical quarantine versus business quarantine
+
+A technical failure is stored as `QUARANTINED` with reasoning beginning:
+
+```text
+AI Hub Agent Error:
+```
+
+A normal business quarantine contains an agent explanation, such as:
+
+```text
+CustomerEmail is missing.
+```
+
+Technical quarantines should not be presented as successful AI decisions.
+
+## Updating Python code
 
 Python files are mounted into the container from:
 
@@ -511,11 +785,18 @@ Python files are mounted into the container from:
 src\python\
 ```
 
-Changes to `autoschema_agent.py` or `schema_mcp_server.py` normally do not require ObjectScript recompilation.
+Changes to the following files normally do not require ObjectScript recompilation:
 
-Save the Python file and rerun the test.
+```text
+autoschema_agent.py
+schema_mcp_server.py
+```
 
-## 16. Updating ObjectScript classes
+Save the file and rerun the test.
+
+`AgentProcess.cls` reloads `autoschema_agent` during development so changes are picked up by the current session.
+
+## Updating ObjectScript classes
 
 Changes to `.cls` files require recompilation:
 
@@ -529,45 +810,49 @@ Use this after modifying:
 AgentProcess.cls
 OrderRecord.cls
 PayloadMsg.cls
-setup.cls
+Setup.cls
 ```
 
-## 17. Leaving the IRIS terminal
-
-Run:
+## Leaving the IRIS terminal
 
 ```objectscript
 Halt
 ```
 
-## 18. Stopping the container
+## Stopping and restarting the container
 
-To stop the container without removing it:
+Stop without removing the container:
 
 ```cmd
 docker compose stop
 ```
 
-To restart it:
+Restart the same container:
 
 ```cmd
 docker compose start
+```
+
+Check its status:
+
+```cmd
+docker compose ps
 ```
 
 Avoid recreating or deleting the container during development unless the setup steps can be repeated.
 
 ## Rebuild warning
 
-The current development setup stores several items inside the running container:
+The current development setup stores several items in the running container:
 
 - imported IRIS classes
-- ObjectScript compiled routines
+- compiled ObjectScript routines
 - saved `AutoSchema.OrderRecord` records
 - AI Hub Config Store entries
 - Wallet credentials
 - manually installed Python packages
 
-These commands can remove that state:
+The following commands may remove that state:
 
 ```cmd
 docker compose down
@@ -588,30 +873,48 @@ After recreating the container, repeat the setup in this order:
 9. Run `AutoSchema.Setup.Init(...)`.
 10. Run the test payloads.
 
-## Security notes
+## Security
 
 - Never commit `.env`.
 - Never commit an AWS Bedrock API key.
 - Never hard-code the `_SYSTEM` password in Python.
-- Never publish a screenshot containing credentials.
-- Rotate any credential that has been exposed in terminal output, chat messages, source code, or screenshots.
+- Never print secret values during environment checks.
+- Never publish screenshots containing credentials.
+- Rotate any credential exposed in source code, terminal output, chat messages, or screenshots.
 - Keep `.env.example` limited to placeholders.
-- Use synthetic order data for demonstrations.
-- Do not use customer, patient, production, NHS, or other confidential data.
+- Obtain the EAP wheel through the official InterSystems portal.
+- Use synthetic order data in demonstrations.
+- Do not use customer, patient, NHS, production, or other confidential data.
 
-## Current development limitation
+## Current development limitations
 
-The current setup uses manual package installation and does not persist IRIS data across container recreation.
+The current setup has the following limitations:
 
-For a reproducible release, the project should add:
+1. Python packages are installed manually in the running container.
+2. IRIS data is not persisted across container recreation.
+3. Wallet and Config Store setup is performed manually.
+4. The MCP stdio transport uses a runtime workaround.
+5. Test payloads currently call `RunAgent()` directly.
+6. A running Interoperability production has not yet been configured.
+7. An end-to-end Interoperability message trace has not yet been demonstrated.
+8. Python dependency versions are not yet pinned.
+9. Automated tests have not yet been added.
+
+For a reproducible competition release, the project should add:
 
 - a custom `Dockerfile`
 - pinned Python dependency versions
-- automated ObjectScript class import
-- automated Config Store descriptor registration
+- automated ObjectScript import and compilation
+- automated Config Store registry initialisation
 - durable IRIS database storage
 - secure credential injection
 - startup health checks
 - automated test payloads
+- a configured IRIS Interoperability production
+- a Business Service or test service that sends `AutoSchema.PayloadMsg`
+- an end-to-end message trace
+- a demonstration video
 
-This will allow another developer or competition judge to start the application without manually rebuilding the environment.
+## License
+
+This project is licensed under the MIT License. See LICENSE.
