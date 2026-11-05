@@ -194,9 +194,15 @@ def run_solver(
     ).decode("ascii")
 
     code = (
-        "import base64,solver;"
-        f"payload=base64.b64decode('{encoded}').decode();"
-        "print(solver.process_ticket(payload))"
+        "import base64,os,iris;"
+        f"payload=base64.b64decode('{encoded}').decode('utf-8');"
+        "connection=iris.connect("
+        "'localhost',1972,'USER','_SYSTEM',os.environ['IRIS_PASSWORD']);"
+        "proxy=iris.createIRIS(connection);"
+        "result=proxy.classMethodValue("
+        "'SupportAgent.TicketService','Submit',payload);"
+        "print(result);"
+        "connection.close()"
     )
 
     result = subprocess.run(

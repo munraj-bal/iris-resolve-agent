@@ -6,18 +6,34 @@ Method OnRequest(
     Output pResponse As SupportAgent.ResolutionResponse
 ) As %Status
 {
-    Set pResponse = ##class(SupportAgent.ResolutionResponse).%New()
-    Set pResponse.TicketID = pRequest.TicketID
-    Set pResponse.ResolutionJSON = ##class(SupportAgent.ResolutionProcess).SolveTicket(pRequest.ToJSON())
+    If '$IsObject(pRequest) {
+        Quit $SYSTEM.Status.Error(
+            5001,
+            "IRIS Resolve Process received an invalid request object."
+        )
+    }
 
-    Quit $$$OK
+    Set pResponse = ##class(SupportAgent.ResolutionResponse).%New()
+
+    If '$IsObject(pResponse) {
+        Quit $SYSTEM.Status.Error(
+            5001,
+            "IRIS Resolve Process could not create the response object."
+        )
+    }
+
+    Set pResponse.TicketID = pRequest.TicketID
+    Set pResponse.ResolutionJSON = ..SolveTicket(
+        pRequest.ToJSON()
+    )
+
+    Quit $SYSTEM.Status.OK()
 }
 
 ClassMethod SolveTicket(
     rawTicketJSON As %String
 ) As %String [ Language = python ]
 {
-    import importlib
     import sys
 
     python_path = "/opt/irisapp/src/python"
@@ -26,9 +42,6 @@ ClassMethod SolveTicket(
         sys.path.insert(0, python_path)
 
     import solver
-
-    # Reload during development so mounted Python changes are picked up.
-    importlib.reload(solver)
 
     return solver.process_ticket(rawTicketJSON)
 }
