@@ -10,7 +10,6 @@ services:
 
     environment:
       IRIS_PASSWORD: "${IRIS_PASSWORD}"
-      CCR_PROVIDER: "${CCR_PROVIDER:-synthetic}"
       PYTHONPATH: "/opt/irisapp/python-packages:/opt/irisapp/src/python"
 
     ports:
@@ -19,7 +18,6 @@ services:
 
     volumes:
       - ./src:/opt/irisapp/src
-      - ./test_data:/opt/irisapp/test_data:ro
       - iris-mgr:/usr/irissys/mgr
 
 volumes:
