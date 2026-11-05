@@ -419,10 +419,6 @@ def parse_ticket(raw_ticket_json: str) -> dict[str, Any]:
             payload.get("iris_namespace"),
             maximum_length=100,
         ),
-        "trakcare_environment": normalise_optional_text(
-            payload.get("trakcare_environment"),
-            maximum_length=100,
-        ),
         "affected_identifier": normalise_optional_text(
             payload.get("affected_identifier"),
             maximum_length=500,
@@ -462,7 +458,6 @@ def detect_instruction_injection(
             str(ticket.get("application") or ""),
             str(ticket.get("site") or ""),
             str(ticket.get("iris_namespace") or ""),
-            str(ticket.get("trakcare_environment") or ""),
             str(ticket.get("affected_identifier") or ""),
             str(ticket.get("expected_interface") or ""),
             str(ticket.get("relevant_time") or ""),

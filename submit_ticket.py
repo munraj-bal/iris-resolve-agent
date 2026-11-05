@@ -112,10 +112,6 @@ def create_payload() -> dict[str, str]:
         "IRIS namespace"
     )
 
-    trakcare_environment = prompt_optional(
-        "TrakCare environment"
-    )
-
     affected_identifier = prompt_optional(
         "Affected episode, appointment, order, or message ID"
     )
@@ -140,7 +136,7 @@ def create_payload() -> dict[str, str]:
     )
 
     environment = prompt_required(
-        "Environment, for example BASE, TEST, UAT, or LIVE"
+        "Affected environment, for example BASE, TEST, UAT, or LIVE"
     ).upper()
 
     return {
@@ -151,7 +147,6 @@ def create_payload() -> dict[str, str]:
         "application": application,
         "site": site,
         "iris_namespace": iris_namespace,
-        "trakcare_environment": trakcare_environment,
         "affected_identifier": affected_identifier,
         "expected_interface": expected_interface,
         "relevant_time": relevant_time,
@@ -178,10 +173,6 @@ def confirm_submission(payload: dict[str, str]) -> bool:
     )
     print(
         f"Namespace:   {payload['iris_namespace'] or 'Not supplied'}"
-    )
-    print(
-        "TrakCare environment: "
-        f"{payload['trakcare_environment'] or 'Not supplied'}"
     )
     print(
         "Affected identifier:  "

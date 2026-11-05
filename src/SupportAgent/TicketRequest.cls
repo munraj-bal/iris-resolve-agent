@@ -29,9 +29,6 @@ Property Site As %String(MAXLEN = 200);
 /// Optional InterSystems IRIS namespace.
 Property IRISNamespace As %String(MAXLEN = 100);
 
-/// Optional TrakCare environment.
-Property TrakCareEnvironment As %String(MAXLEN = 100);
-
 /// Optional episode, appointment, order, message, or transaction identifier.
 Property AffectedIdentifier As %String(MAXLEN = 500);
 
@@ -52,7 +49,6 @@ Method ToJSON() As %String
         "application": (..Application),
         "site": (..Site),
         "iris_namespace": (..IRISNamespace),
-        "trakcare_environment": (..TrakCareEnvironment),
         "affected_identifier": (..AffectedIdentifier),
         "expected_interface": (..ExpectedInterface),
         "relevant_time": (..RelevantTime),
