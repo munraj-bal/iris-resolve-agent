@@ -1,8 +1,8 @@
 # IRIS Resolve
 
-IRIS Resolve is a read-only support ticket investigation agent built with InterSystems IRIS, IRIS AI Hub, Model Context Protocol, LangChain, and Amazon Bedrock.
+IRIS Resolve is a read-only support ticket investigation agent built with InterSystems IRIS, IRIS Interoperability, IRIS AI Hub, Model Context Protocol, LangChain, and Amazon Bedrock.
 
-The application analyses user-supplied ticket details and technical evidence, identifies missing or conflicting information, proposes safe diagnostic procedures, and returns a structured recommendation for human review.
+Users enter ticket details and optionally paste technical evidence. The request passes through an IRIS Interoperability production, where an IRIS AI Hub agent evaluates the evidence, calls approved read-only MCP diagnostic tools, and returns a structured recommendation for human review.
 
 IRIS Resolve never applies automatic corrective actions.
 
@@ -16,41 +16,79 @@ Support investigations often require information from several technical areas, i
 - Routing and suppression rules
 - CCR transport output
 - Find GUID results
-- SQL queries
+- SQL query output
 - Configuration records
+- Queue status
 - Previous investigation notes
 
-IRIS Resolve gives support engineers a structured way to provide this evidence to an AI agent.
+IRIS Resolve provides a structured workflow for supplying this evidence to an AI agent.
 
-The agent separates established facts from hypotheses, selects an appropriate investigation outcome, calls approved read-only MCP diagnostic tools, and returns practical next steps.
+The agent separates established facts from hypotheses, selects an appropriate investigation outcome, calls approved diagnostic tools, and returns practical next steps.
 
 ## Key features
 
+- InterSystems IRIS Interoperability production
+- Business Service and Business Process message flow
 - Interactive command-line interface
 - General and CCR-related ticket support
 - Multiline ticket descriptions and technical evidence
 - TrakCare and InterSystems IRIS investigation context
 - IRIS AI Hub model configuration
-- Amazon Bedrock integration
-- Read-only MCP tools
+- Amazon Bedrock model integration
+- Read-only MCP diagnostic tools
 - Deterministic evidence validation
 - Deterministic confidence calculation
 - Instruction-injection detection
 - Five structured decision outcomes
+- Message Viewer and Visual Trace support
 - Mandatory human approval
 - No automatic ticket, CCR, data, code, or configuration changes
 
-## Example use cases
+## Interoperability workflow
 
-IRIS Resolve can assist with investigations such as:
+IRIS Resolve runs through an InterSystems IRIS Interoperability production:
 
-- An expected HL7 message was not generated
-- A message was generated but not routed or transmitted
-- A CCR item set failed during `Load()`
-- A CCR contains missing GUID references
-- A CCR appears to have an incorrect prerequisite
-- A rescheduled appointment lost an association required by an outbound interface
-- Ticket communications contain incomplete or contradictory evidence
+```text
+submit_ticket.py
+        |
+        | IRIS Native API
+        v
+SupportAgent.TicketService
+        |
+        | SupportAgent.TicketRequest
+        v
+SupportAgent.ResolutionProcess
+        |
+        | Embedded Python
+        v
+solver.process_ticket()
+        |
+        v
+IRIS AI Hub
+        |
+        v
+Amazon Bedrock
+        |
+        v
+Read-only MCP tools
+        |
+        v
+Deterministic validation and confidence calculation
+        |
+        | SupportAgent.ResolutionResponse
+        v
+SupportAgent.TicketService
+        |
+        v
+submit_ticket.py displays the result
+```
+
+Each submission creates two Interoperability messages in one session:
+
+1. `IRIS Resolve Ticket Service` sends a `SupportAgent.TicketRequest` to `IRIS Resolve Process`.
+2. `IRIS Resolve Process` returns a `SupportAgent.ResolutionResponse` to the service.
+
+The complete request and response can be inspected in the IRIS Management Portal using Message Viewer and Visual Trace.
 
 ## Decision outcomes
 
@@ -64,7 +102,7 @@ IRIS Resolve returns one of five decisions:
 | `NEEDS_INVESTIGATION` | The available evidence is insufficient, inconclusive, or materially conflicting. |
 | `REJECT` | The input is invalid or contains a detected instruction-injection attempt. |
 
-The AI model selects a preliminary decision. Python then validates the evidence, calculates confidence, validates requested diagnostics, and selects the final decision.
+The AI model selects a preliminary decision. Python then validates the evidence, validates the selected diagnostics, calculates confidence, and selects the final decision.
 
 ## Confidence calculation
 
@@ -79,7 +117,7 @@ Confidence is calculated deterministically from factors including:
 - Approved diagnostic procedure retrieved
 - Absence of conflicting evidence
 
-Current decision thresholds are:
+Current thresholds are:
 
 | Decision | Minimum confidence |
 |---|---:|
@@ -87,11 +125,11 @@ Current decision thresholds are:
 | `PROPOSE_DIAGNOSTICS` | 65% |
 | `REQUEST_INFORMATION` | 40% |
 
-`REJECT`, `REQUEST_INFORMATION`, and `NEEDS_INVESTIGATION` decisions are preserved when selected for their corresponding safety or evidence conditions.
+`REJECT`, `REQUEST_INFORMATION`, and `NEEDS_INVESTIGATION` are preserved when selected for their corresponding safety or evidence conditions.
 
 ## Read-only MCP tools
 
-The MCP server exposes the following approved diagnostic procedures:
+The MCP server exposes approved diagnostic procedures:
 
 - `MANUAL_EVIDENCE_REVIEW`
 - `ENVIRONMENT_CONFIRMATION`
@@ -101,10 +139,10 @@ The MCP server exposes the following approved diagnostic procedures:
 
 These tools return controlled investigation procedures. They do not connect to or modify external systems.
 
-For example:
+Examples:
 
 - `OUTBOUND_TRACE_REVIEW` separates message generation, routing, filtering, suppression, queueing, transmission, and receipt.
-- `FIND_GUID_REVIEW` guides comparison of GUID references across environments without changing any GUID.
+- `FIND_GUID_REVIEW` guides comparison of GUID references across environments without changing a GUID.
 - `CCR_TRANSPORT_EVIDENCE_REVIEW` reviews manually supplied CCR transport evidence without retrying or updating a CCR.
 
 ## Safety model
@@ -144,9 +182,9 @@ Every result includes:
 }
 ```
 
-## Data sources
+## Supported evidence
 
-IRIS Resolve currently analyses information entered or pasted by the user.
+IRIS Resolve analyses information entered or pasted by the user.
 
 Supported evidence includes:
 
@@ -162,43 +200,59 @@ Supported evidence includes:
 - Successful comparison cases
 - Previous investigation notes
 
-A CCR ID is treated as contextual information only.
+A supplied CCR ID is treated as contextual information only.
 
-The agent does not claim that a live system was queried. Manually pasted evidence is clearly identified as user-supplied and not independently verified.
+The agent does not claim that a live system was queried. Manually pasted evidence is identified as user-supplied and not independently verified.
+
+## Example use cases
+
+IRIS Resolve can assist with investigations such as:
+
+- An expected HL7 message was not generated
+- A message was generated but not routed or transmitted
+- A CCR item set failed during `Load()`
+- A CCR contains missing GUID references
+- A CCR appears to have an incorrect prerequisite
+- A rescheduled appointment lost an association required by an outbound interface
+- Ticket communications contain incomplete or contradictory evidence
 
 ## Architecture
 
 ```text
-User enters ticket details and evidence
-                  |
-                  v
-           submit_ticket.py
-                  |
-                  v
+CLI and Native API
+        |
+        v
+IRIS Interoperability Production
+        |
+        +-- IRIS Resolve Ticket Service
+        |
+        +-- IRIS Resolve Process
+                    |
+                    v
               solver.py
-                  |
-        +---------+---------+
-        |                   |
-        v                   v
-ticket_validation.py   agent_runner.py
-                            |
-                            v
-                    IRIS AI Hub
-                            |
-                            v
-                   Amazon Bedrock
-                            |
-                            v
-                Read-only MCP tools
-                            |
-                            v
-                    decisions.py
-                            |
-                            v
-                     results.py
-                            |
-                            v
-             Human-reviewed recommendation
+                    |
+        +-----------+-----------+
+        |                       |
+        v                       v
+ticket_validation.py       agent_runner.py
+                                    |
+                                    v
+                              IRIS AI Hub
+                                    |
+                                    v
+                             Amazon Bedrock
+                                    |
+                                    v
+                           Read-only MCP tools
+                                    |
+                                    v
+                              decisions.py
+                                    |
+                                    v
+                               results.py
+                                    |
+                                    v
+                     SupportAgent.ResolutionResponse
 ```
 
 ## Project structure
@@ -217,7 +271,6 @@ iris-resolve-agent/
 |   |   `-- ticket_validation.py
 |   `-- SupportAgent/
 |       |-- Production.cls
-|       |-- ResolutionOperation.cls
 |       |-- ResolutionProcess.cls
 |       |-- ResolutionRecord.cls
 |       |-- ResolutionResponse.cls
@@ -253,17 +306,37 @@ iris-resolve-agent/
 - Optional technical evidence
 - Affected environment
 
-The user can review all information before submitting it.
+The user can review all information before submission.
+
+The CLI uses the IRIS Native API to invoke `SupportAgent.TicketService.Submit()`. It does not call the Python solver directly.
+
+### Business Service
+
+`SupportAgent.TicketService` is the entry point into the Interoperability production.
+
+The service:
+
+1. Receives the JSON ticket payload.
+2. Creates a `SupportAgent.TicketRequest`.
+3. Sends the request synchronously to `IRIS Resolve Process`.
+4. Receives the structured response.
+5. Returns the resolution JSON to the CLI.
+
+### Business Process
+
+`SupportAgent.ResolutionProcess` receives the ticket request and invokes `solver.process_ticket()` through Embedded Python.
+
+The Business Process returns a `SupportAgent.ResolutionResponse` containing the validated AI result.
 
 ### Solver
 
-`solver.py` is the stable public entry point:
+`solver.py` is the stable Python entry point:
 
 ```python
 solver.process_ticket(raw_ticket_json)
 ```
 
-The solver coordinates ticket validation, AI agent execution, decision validation, confidence calculation, and controlled error handling.
+The solver coordinates ticket validation, agent execution, deterministic result validation, confidence calculation, and controlled error handling.
 
 ### Agent runner
 
@@ -278,9 +351,9 @@ The solver coordinates ticket validation, AI agent execution, decision validatio
 
 ### Validation and decisions
 
-`ticket_validation.py` handles input validation and instruction-injection detection.
+`ticket_validation.py` handles input parsing, normalisation, required-field checks, and instruction-injection detection.
 
-`decisions.py` validates evidence, calculates confidence, validates diagnostic procedures, and selects the final decision.
+`decisions.py` validates evidence, validates diagnostic procedures, calculates confidence, and selects the final decision.
 
 `results.py` creates standard results for missing information, rejected input, and technical failures.
 
@@ -288,15 +361,13 @@ The solver coordinates ticket validation, AI agent execution, decision validatio
 
 `ticket_mcp_server.py` provides the resolution policy, safety policy, and approved read-only diagnostic procedures.
 
-### ObjectScript integration
+### Setup
 
-`SupportAgent.TicketRequest` represents the structured ticket request.
+`SupportAgent.Setup` configures:
 
-`SupportAgent.ResolutionProcess` invokes `solver.process_ticket()` through Embedded Python.
-
-`SupportAgent.ResolutionResponse` returns the structured resolution JSON.
-
-`SupportAgent.Setup` configures the IRIS Wallet, Amazon Bedrock model, and MCP server.
+- IRIS Wallet credentials
+- Amazon Bedrock model configuration
+- MCP server configuration
 
 ## Prerequisites
 
@@ -356,7 +427,7 @@ docker compose build --no-cache
 docker compose up -d
 ```
 
-Check the status:
+Check its status:
 
 ```cmd
 docker compose ps
@@ -427,7 +498,7 @@ Expected:
 IRIS connection successful
 ```
 
-## Configure IRIS AI Hub
+## Configure IRIS AI Hub and Interoperability
 
 Open an IRIS terminal:
 
@@ -442,10 +513,9 @@ Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/TicketRequest.cls","ck")
 Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/ResolutionResponse.cls","ck")
 Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/ResolutionRecord.cls","ck")
 Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/ResolutionProcess.cls","ck")
-Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/Setup.cls","ck")
 Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/TicketService.cls","ck")
-Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/ResolutionOperation.cls","ck")
 Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/Production.cls","ck")
+Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/Setup.cls","ck")
 ```
 
 Register the AI Hub configuration descriptors:
@@ -463,10 +533,44 @@ Do $SYSTEM.Status.DisplayError(sc)
 
 Do not commit, log, paste, or share the real API key.
 
+Start the Interoperability production:
+
+```objectscript
+Set sc = ##class(Ens.Director).StartProduction("SupportAgent.Production")
+Do $SYSTEM.Status.DisplayError(sc)
+```
+
 Exit the terminal:
 
 ```objectscript
 Halt
+```
+
+## Verify the production
+
+Open the System Management Portal:
+
+```text
+http://localhost:9092/csp/sys/UtilHome.csp
+```
+
+Select the `USER` namespace and open:
+
+```text
+Interoperability
+→ Configure
+→ Production
+→ SupportAgent.Production
+```
+
+The production should show two green components:
+
+```text
+Services
+└── IRIS Resolve Ticket Service
+
+Processes
+└── IRIS Resolve Process
 ```
 
 ## Run IRIS Resolve
@@ -481,15 +585,19 @@ The CLI guides the user through the ticket information and allows multiline evid
 
 ## Demonstration
 
-The following synthetic example exercises the full AI Hub and MCP diagnostic workflow.
+The following synthetic example exercises the complete Interoperability, AI Hub, Bedrock, and MCP workflow.
 
 ```text
-Ticket ID: DEMO-I001
-Ticket title: TrakCare cancellation did not generate SIU_S15
+Ticket ID: INTEROP-DEMO-001
+Ticket title: TrakCare cancellation did not generate an SIU_S15 message
 
 Ticket description:
-An appointment cancellation completed successfully, but no SIU_S15 appeared
-in the reviewed outbound trace.
+An appointment cancellation completed successfully in TrakCare TEST, but the
+expected HL7 SIU_S15 cancellation message did not appear in the reviewed
+outbound trace.
+
+Please identify the appropriate read-only investigation steps and the evidence
+required before a root cause or fix is proposed.
 END
 
 CCR ID:
@@ -503,9 +611,12 @@ Relevant timestamp or time range:
 Cancellation at 10:59:40; trace reviewed from 10:50 to 11:10
 
 Additional evidence:
-SIU_S12 and SIU_S14 were generated for the same appointment.
-No SIU_S15 appeared in the reviewed trace.
-The trace component and filters have not been independently confirmed.
+The cancellation completed without an application error.
+The cancellation is visible against appointment DEMO-123456.
+No SIU_S15 appeared in the reviewed outbound trace.
+SIU_S12 and SIU_S14 were previously generated for the same appointment.
+The trace component, filters, routing result, suppression decision and queue
+status have not yet been confirmed.
 END
 
 Affected environment: TEST
@@ -521,7 +632,33 @@ Human approval:        Yes
 Automatic changes:     No
 ```
 
-The agent proposes `OUTBOUND_TRACE_REVIEW` and recommends checking message generation, routing, filtering, suppression, queueing, transmission, and successful comparison evidence before a resolution is considered.
+The agent selects `OUTBOUND_TRACE_REVIEW` and recommends checking message generation, routing, filtering, suppression, queueing, transmission, and successful comparison evidence before a resolution is considered.
+
+## Inspect the Interoperability messages
+
+After running the CLI, open:
+
+```text
+Interoperability
+→ View
+→ Message Viewer
+```
+
+A successful session contains two messages:
+
+```text
+IRIS Resolve Ticket Service
+        → IRIS Resolve Process
+
+IRIS Resolve Process
+        → IRIS Resolve Ticket Service
+```
+
+The first message contains the `SupportAgent.TicketRequest`.
+
+The second message contains the `SupportAgent.ResolutionResponse`, including the complete structured AI result.
+
+Open the session using Visual Trace to view the request and response path through the production.
 
 ## Example structured result
 
