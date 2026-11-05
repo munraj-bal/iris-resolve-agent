@@ -6,187 +6,161 @@ import base64
 import json
 import subprocess
 import sys
-from typing import Any
+from typing import Any, Final
 
 
-CONTAINER_NAME = "iris-ai-hub"
+CONTAINER_NAME: Final[str] = "iris-ai-hub"
+
+OPTIONAL_FIELDS: Final[tuple[tuple[str, str], ...]] = (
+    ("ccr_id", "CCR ID, if applicable"),
+    (
+        "application",
+        "Application or product, for example TrakCare",
+    ),
+    ("site", "Site or customer"),
+    ("iris_namespace", "IRIS namespace"),
+    (
+        "affected_identifier",
+        "Affected episode, appointment, order, or message ID",
+    ),
+    (
+        "expected_interface",
+        "Expected interface or message type",
+    ),
+    (
+        "relevant_time",
+        "Relevant timestamp or time range",
+    ),
+)
+
+REVIEW_LABELS: Final[tuple[tuple[str, str], ...]] = (
+    ("ticket_id", "Ticket ID"),
+    ("title", "Title"),
+    ("ccr_id", "CCR ID"),
+    ("environment", "Environment"),
+    ("application", "Application"),
+    ("site", "Site"),
+    ("iris_namespace", "Namespace"),
+    ("affected_identifier", "Affected identifier"),
+    ("expected_interface", "Expected interface"),
+    ("relevant_time", "Relevant time"),
+)
 
 
 def configure_console_encoding() -> None:
     """Configure UTF-8 output when supported."""
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8")
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
 
 def prompt_required(label: str) -> str:
-    """Prompt until the user provides a non-empty value."""
-    while True:
-        value = input(f"{label}: ").strip()
-
-        if value:
-            return value
-
-        print("This field is required. Please enter a value.")
-
-
-def prompt_optional(label: str) -> str:
-    """Prompt for an optional value."""
-    return input(f"{label}: ").strip()
-
-
-def prompt_multiline(
-    label: str,
-    *,
-    required: bool,
-    instructions: str,
-) -> str:
-    """Collect multiline text until the user enters END."""
-    print(f"\n{label}")
-    print(instructions)
-    print("Enter END on a new line when finished.\n")
-
-    lines: list[str] = []
-
-    while True:
-        try:
-            line = input()
-        except EOFError:
-            break
-
-        if line.strip().upper() == "END":
-            break
-
-        lines.append(line)
-
-    value = "\n".join(lines).strip()
-
-    if required and not value:
-        print("This field is required.")
-        return prompt_multiline(
-            label,
-            required=True,
-            instructions=instructions,
+    """Prompt until a value is provided."""
+    while not (
+        value := input(f"{label}: ").strip()
+    ):
+        print(
+            "This field is required. "
+            "Please enter a value."
         )
 
     return value
 
 
+def prompt_multiline(
+    label: str,
+    instructions: str,
+    *,
+    required: bool = False,
+) -> str:
+    """Collect multiline text until END."""
+    while True:
+        print(f"\n{label}")
+        print(instructions)
+        print("Enter END on a new line when finished.\n")
+
+        lines: list[str] = []
+
+        while True:
+            try:
+                line = input()
+            except EOFError:
+                line = "END"
+
+            if line.strip().upper() == "END":
+                break
+
+            lines.append(line)
+
+        value = "\n".join(lines).strip()
+
+        if value or not required:
+            return value
+
+        print("This field is required.")
+
+
 def create_payload() -> dict[str, str]:
-    """Collect ticket details and optional evidence from the user."""
+    """Collect ticket details and evidence."""
     print("=" * 72)
     print("IRIS Resolve")
     print("Read-only AI-assisted ticket investigation")
     print("=" * 72)
-
     print(
         "\nEnter the support ticket information. "
-        "No JSON files or live system connections are required."
+        "No JSON files or live connections are required."
     )
 
-    ticket_id = prompt_required("Ticket ID")
-    title = prompt_required("Ticket title")
-
-    description = prompt_multiline(
-        "Ticket description",
-        required=True,
-        instructions=(
-            "Paste or type the reported issue, expected behaviour, "
-            "actual behaviour, and relevant context."
+    payload = {
+        "ticket_id": prompt_required("Ticket ID"),
+        "title": prompt_required("Ticket title"),
+        "description": prompt_multiline(
+            "Ticket description",
+            (
+                "Enter the issue, expected behaviour, "
+                "actual behaviour, and context."
+            ),
+            required=True,
         ),
+    }
+
+    payload.update(
+        {
+            key: input(f"{label}: ").strip()
+            for key, label in OPTIONAL_FIELDS
+        }
     )
 
-    ccr_id = prompt_optional(
-        "CCR ID, if applicable"
-    )
-
-    application = prompt_optional(
-        "Application or product, for example TrakCare"
-    )
-
-    site = prompt_optional(
-        "Site or customer"
-    )
-
-    iris_namespace = prompt_optional(
-        "IRIS namespace"
-    )
-
-    affected_identifier = prompt_optional(
-        "Affected episode, appointment, order, or message ID"
-    )
-
-    expected_interface = prompt_optional(
-        "Expected interface or message type"
-    )
-
-    relevant_time = prompt_optional(
-        "Relevant timestamp or time range"
-    )
-
-    additional_evidence = prompt_multiline(
+    payload["additional_evidence"] = prompt_multiline(
         "Additional evidence, if available",
-        required=False,
-        instructions=(
-            "Paste outbound traces, transport logs, Find GUID output, "
-            "SQL results, error messages, configuration details, "
-            "queue status, successful comparison cases, or previous "
-            "investigation notes. Enter END immediately to skip."
+        (
+            "Paste traces, transport logs, Find GUID output, "
+            "SQL results, errors, configuration details, "
+            "comparison cases, or investigation notes. "
+            "Enter END immediately to skip."
         ),
     )
 
-    environment = prompt_required(
+    payload["environment"] = prompt_required(
         "Affected environment, for example BASE, TEST, UAT, or LIVE"
     ).upper()
 
-    return {
-        "ticket_id": ticket_id,
-        "title": title,
-        "description": description,
-        "ccr_id": ccr_id,
-        "application": application,
-        "site": site,
-        "iris_namespace": iris_namespace,
-        "affected_identifier": affected_identifier,
-        "expected_interface": expected_interface,
-        "relevant_time": relevant_time,
-        "additional_evidence": additional_evidence,
-        "environment": environment,
-    }
+    return payload
 
 
-def confirm_submission(payload: dict[str, str]) -> bool:
-    """Display the supplied information and request confirmation."""
+def confirm_submission(
+    payload: dict[str, str],
+) -> bool:
+    """Review the ticket and request confirmation."""
     print("\n" + "=" * 72)
     print("Review ticket information")
     print("=" * 72)
 
-    print(f"Ticket ID:   {payload['ticket_id']}")
-    print(f"Title:       {payload['title']}")
-    print(f"CCR ID:      {payload['ccr_id'] or 'Not supplied'}")
-    print(f"Environment: {payload['environment']}")
-    print(
-        f"Application: {payload['application'] or 'Not supplied'}"
-    )
-    print(
-        f"Site:        {payload['site'] or 'Not supplied'}"
-    )
-    print(
-        f"Namespace:   {payload['iris_namespace'] or 'Not supplied'}"
-    )
-    print(
-        "Affected identifier:  "
-        f"{payload['affected_identifier'] or 'Not supplied'}"
-    )
-    print(
-        "Expected interface:   "
-        f"{payload['expected_interface'] or 'Not supplied'}"
-    )
-    print(
-        "Relevant time:        "
-        f"{payload['relevant_time'] or 'Not supplied'}"
-    )
-
+    for key, label in REVIEW_LABELS:
+        print(
+            f"{label + ':':<22}"
+            f"{payload.get(key) or 'Not supplied'}"
+        )
 
     print("\nDescription:")
     print(payload["description"])
@@ -198,57 +172,54 @@ def confirm_submission(payload: dict[str, str]) -> bool:
     )
 
     while True:
-        response = input(
+        answer = input(
             "\nSubmit this ticket to IRIS Resolve? [Y/n]: "
         ).strip().lower()
 
-        if response in {"", "y", "yes"}:
+        if answer in {"", "y", "yes"}:
             return True
 
-        if response in {"n", "no"}:
+        if answer in {"n", "no"}:
             return False
 
         print("Enter Y or N.")
 
 
-def run_solver(payload: dict[str, str]) -> dict[str, Any]:
-    """Run solver.py inside the IRIS Docker container."""
-    encoded_payload = base64.b64encode(
+def run_solver(
+    payload: dict[str, str],
+) -> dict[str, Any]:
+    """Run IRIS Resolve inside the Docker container."""
+    encoded = base64.b64encode(
         json.dumps(payload).encode("utf-8")
     ).decode("ascii")
 
-    python_code = (
-        "import base64,json,solver;"
-        f"payload=base64.b64decode('{encoded_payload}').decode('utf-8');"
-        "result=solver.process_ticket(payload);"
-        "print(result)"
+    code = (
+        "import base64,solver;"
+        f"payload=base64.b64decode('{encoded}').decode();"
+        "print(solver.process_ticket(payload))"
     )
 
-    command = [
-        "docker",
-        "exec",
-        CONTAINER_NAME,
-        "python3",
-        "-c",
-        python_code,
-    ]
-
     result = subprocess.run(
-        command,
+        [
+            "docker",
+            "exec",
+            CONTAINER_NAME,
+            "python3",
+            "-c",
+            code,
+        ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
 
-    if result.returncode != 0:
-        error_output = (
+    if result.returncode:
+        raise RuntimeError(
             result.stderr.strip()
             or result.stdout.strip()
-        )
-
-        raise RuntimeError(
-            "IRIS Resolve could not run successfully.\n\n"
-            f"{error_output}"
+            or "IRIS Resolve failed without output."
         )
 
     output = result.stdout.strip()
@@ -262,8 +233,8 @@ def run_solver(payload: dict[str, str]) -> dict[str, Any]:
         return json.loads(output)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            "IRIS Resolve returned an invalid response.\n\n"
-            f"Raw output:\n{output}"
+            "IRIS Resolve returned invalid JSON.\n\n"
+            f"{output}"
         ) from exc
 
 
@@ -271,7 +242,7 @@ def display_list(
     title: str,
     values: list[Any],
 ) -> None:
-    """Display a titled list."""
+    """Display a numbered list."""
     print(f"\n{title}")
     print("-" * len(title))
 
@@ -279,91 +250,86 @@ def display_list(
         print("None")
         return
 
-    for index, value in enumerate(values, start=1):
+    for index, value in enumerate(values, 1):
         print(f"{index}. {value}")
 
 
 def display_evidence(
     evidence: list[dict[str, Any]],
 ) -> None:
-    """Display evidence used by the solver."""
+    """Display validated evidence."""
     print("\nEvidence")
     print("-" * 8)
 
     if not evidence:
-        print("No supporting evidence was supplied or validated.")
+        print(
+            "No supporting evidence was supplied "
+            "or validated."
+        )
         return
 
-    for index, item in enumerate(evidence, start=1):
-        source = item.get(
-            "source",
-            "Unknown source",
+    for index, item in enumerate(evidence, 1):
+        print(
+            f"\n{index}. "
+            f"{item.get('source', 'Unknown source')}"
         )
-        evidence_id = item.get(
-            "evidence_id",
-            "No ID",
+        print(
+            "   Evidence ID: "
+            f"{item.get('evidence_id', 'No ID')}"
         )
-        finding = item.get(
-            "finding",
-            "No finding supplied",
+        print(
+            "   Finding: "
+            f"{item.get('finding', 'No finding supplied')}"
         )
-
-        print(f"\n{index}. {source}")
-        print(f"   Evidence ID: {evidence_id}")
-        print(f"   Finding: {finding}")
 
 
 def yes_no(value: Any) -> str:
-    """Convert a Boolean-like value into Yes or No."""
+    """Return Yes or No."""
     return "Yes" if value else "No"
 
 
-def display_result(result: dict[str, Any]) -> None:
-    """Display the solver response in a user-friendly format."""
+def display_result(
+    result: dict[str, Any],
+) -> None:
+    """Display a solver response."""
     print("\n" + "=" * 72)
     print("IRIS Resolve result")
     print("=" * 72)
 
-    print(
-        f"Ticket:              "
-        f"{result.get('ticket_id', 'Unknown')}"
+    summary = (
+        ("Ticket", result.get("ticket_id", "Unknown")),
+        ("Environment", result.get("environment", "Unknown")),
+        (
+            "CCR reference",
+            result.get("ccr_id") or "Not supplied",
+        ),
+        ("Status", result.get("status", "Unknown")),
+        ("Decision", result.get("decision", "Unknown")),
+        (
+            "Preliminary decision",
+            result.get("preliminary_agent_decision")
+            or "None",
+        ),
+        (
+            "Confidence",
+            f"{result.get('confidence_percent', 0)}%",
+        ),
+        (
+            "Manual evidence",
+            yes_no(result.get("user_evidence_supplied")),
+        ),
+        (
+            "Human approval",
+            yes_no(result.get("requires_human_approval")),
+        ),
+        (
+            "Automatic changes",
+            yes_no(result.get("automatic_changes_performed")),
+        ),
     )
-    print(
-        f"Environment:         "
-        f"{result.get('environment', 'Unknown')}"
-    )
-    print(
-        f"CCR reference:       "
-        f"{result.get('ccr_id') or 'Not supplied'}"
-    )
-    print(
-        f"Status:              "
-        f"{result.get('status', 'Unknown')}"
-    )
-    print(
-        f"Decision:            "
-        f"{result.get('decision', 'Unknown')}"
-    )
-    print(
-        "Preliminary decision: "
-        f"{result.get('preliminary_agent_decision') or 'None'}"
-    )
-    print(
-        f"Confidence:          "
-        f"{result.get('confidence_percent', 0)}%"
-    )
-    print(
-        "Manual evidence:     "
-        f"{yes_no(result.get('user_evidence_supplied'))}"
-    )
-    print(
-        "Human approval:      "
-        f"{yes_no(result.get('requires_human_approval'))}"
-    )
-    print(
-        "Automatic changes:   "
-        f"{yes_no(result.get('automatic_changes_performed'))}"
-    )
+
+    for label, value in summary:
+        print(f"{label + ':':<23}{value}")
 
     print("\nAI assessment")
     print("-" * 13)
@@ -372,9 +338,7 @@ def display_result(result: dict[str, Any]) -> None:
         or "No assessment was returned."
     )
 
-    root_cause = result.get("root_cause")
-
-    if root_cause:
+    if root_cause := result.get("root_cause"):
         print("\nRoot cause")
         print("-" * 10)
         print(root_cause)
@@ -383,9 +347,7 @@ def display_result(result: dict[str, Any]) -> None:
             f"{yes_no(result.get('root_cause_supported'))}"
         )
 
-    display_evidence(
-        result.get("evidence", [])
-    )
+    display_evidence(result.get("evidence", []))
     display_list(
         "Recommended actions",
         result.get("recommended_actions", []),
@@ -405,7 +367,7 @@ def display_result(result: dict[str, Any]) -> None:
 
     print("\n" + "=" * 72)
     print(
-        "IRIS Resolve analysed user-supplied information only "
+        "IRIS Resolve analysed user-supplied information "
         "and performed no automatic changes."
     )
     print("=" * 72)
@@ -419,10 +381,7 @@ def main() -> int:
         payload = create_payload()
 
         if not confirm_submission(payload):
-            print(
-                "\nSubmission cancelled. "
-                "No information was sent."
-            )
+            print("\nSubmission cancelled.")
             return 0
 
         print(
@@ -430,27 +389,21 @@ def main() -> int:
             "This may take a few moments...\n"
         )
 
-        result = run_solver(payload)
-        display_result(result)
+        display_result(run_solver(payload))
         return 0
 
     except KeyboardInterrupt:
         print("\n\nCancelled by user.")
         return 130
-
     except FileNotFoundError:
         print(
-            "\nError: Docker could not be found. "
-            "Confirm Docker Desktop is installed and running.",
+            "\nDocker could not be found. "
+            "Confirm Docker Desktop is running.",
             file=sys.stderr,
         )
         return 1
-
     except RuntimeError as exc:
-        print(
-            f"\nError:\n{exc}",
-            file=sys.stderr,
-        )
+        print(f"\nError:\n{exc}", file=sys.stderr)
         return 1
 
 
