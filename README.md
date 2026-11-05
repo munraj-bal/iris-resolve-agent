@@ -1,363 +1,51 @@
-# IRIS Resolve
+## Reproducible Docker setup
 
-IRIS Resolve is an evidence-grounded support ticket resolution agent built with InterSystems IRIS AI Hub, IRIS Interoperability, AWS Bedrock, MCP tools, and read-only CCR evidence providers.
+IRIS Resolve uses a custom Docker image based on InterSystems IRIS Community AI.
 
-The user supplies an iService-style ticket title and description, plus an optional CCR identifier. The completed agent will decide which read-only CCR tools to call, inspect the returned evidence, propose a resolution or diagnostic steps, calculate a deterministic confidence score, and store an auditable result in IRIS.
+The image automatically installs:
 
-> Current status: The ticket data models and synthetic read-only CCR provider are implemented and tested. The MCP tools, AI solver, IRIS Interoperability production, persistence operation, and CLI submission flow are being implemented.
+- The InterSystems IRIS Python driver
+- The InterSystems LangChain integration wheel
+- LangChain and its required dependencies
+- LangChain MCP adapters
+- The LangChain AWS integration required for Amazon Bedrock
 
-## Contents
-
-- [Current functionality](#current-functionality)
-- [Planned workflow](#planned-workflow)
-- [Decision outcomes](#decision-outcomes)
-- [Confidence scoring](#confidence-scoring)
-- [CCR provider modes](#ccr-provider-modes)
-- [Project structure](#project-structure)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Testing the ticket models](#testing-the-ticket-models)
-- [Testing the CCR provider](#testing-the-ccr-provider)
-- [Security](#security)
-- [Development status](#development-status)
-- [License](#license)
-
-## Current functionality
-
-The following components are implemented:
-
-- IRIS ticket request model
-- IRIS resolution response model
-- Persistent IRIS resolution record
-- Conversion of ticket requests into JSON
-- Synthetic read-only CCR provider
-- CCR identifier validation
-- Normalised CCR details
-- Normalised CCR transport-log evidence
-- Protection against path-traversal attempts
-- Controlled handling of unknown CCR identifiers
-- Disabled live CCR provider that fails safely
-- Docker mounting of synthetic CCR fixtures as read-only data
-- Environment-based CCR provider selection
-
-The following components are being implemented:
-
-- MCP tools that expose the CCR provider to the AI agent
-- `solver.py` AI Hub orchestration
-- Deterministic confidence calculation
-- IRIS Business Service
-- IRIS Business Process
-- IRIS Business Operation
-- IRIS Interoperability production
-- CLI ticket submission
-- End-to-end IRIS Message Trace demonstration
-
-## Planned workflow
-
-The completed application will follow this flow:
+Python dependencies are installed into:
 
 ```text
-User enters ticket title and description
-                |
-                v
-SupportAgent.TicketService
-                |
-                v
-SupportAgent.TicketRequest
-                |
-                v
-SupportAgent.ResolutionProcess
-                |
-                v
-IRIS AI Hub model configuration
-                |
-                v
-AWS Bedrock Claude model
-                |
-                v
-Agent selects read-only MCP tools
-                |
-                +--> get_ccr_details()
-                |
-                +--> get_ccr_transport_logs()
-                |
-                +--> get_resolution_policy()
-                |
-                v
-Evidence validation and confidence calculation
-                |
-                v
-SupportAgent.ResolutionOperation
-                |
-                v
-SupportAgent.ResolutionRecord
+/opt/irisapp/python-packages
 ```
 
-The user will provide:
+The directory is added to `PYTHONPATH` by the Docker image and Docker Compose configuration.
 
-- Ticket ID, optional
-- Ticket title, required
-- Ticket description, required
-- CCR ID, optional
-- Affected environment, optional
+### Prerequisites
 
-The agent will then:
+The following are required:
 
-1. Inspect the supplied ticket information.
-2. Determine whether a CCR is relevant.
-3. Decide whether CCR details are needed.
-4. Decide whether CCR transport logs are needed.
-5. Call the appropriate read-only MCP tools.
-6. Evaluate the returned evidence.
-7. Select a supported outcome.
-8. Generate recommended actions.
-9. Identify missing information and risks.
-10. Calculate an evidence-based confidence score.
-11. Store the result in IRIS.
-12. Require human approval before any operational action.
+- Docker Desktop
+- Access to the InterSystems internal Docker registry
+- The InterSystems `langchain_intersystems` wheel
+- An Amazon Bedrock API key
+- A local `.env` file containing the private IRIS password
+- Synthetic ticket and CCR fixture data for local testing
 
-## Decision outcomes
-
-The completed solver will support these outcomes:
-
-| Decision | Meaning |
-|---|---|
-| `PROPOSE_RESOLUTION` | Available evidence strongly supports a likely resolution |
-| `PROPOSE_DIAGNOSTICS` | A cause is plausible, but diagnostic checks are still required |
-| `REQUEST_INFORMATION` | Required ticket or technical evidence is missing |
-| `NEEDS_INVESTIGATION` | Evidence is insufficient, conflicting, or inconclusive |
-| `REJECT` | The input is invalid or contains an instruction-injection attempt |
-
-A proposed resolution remains advisory and requires human review.
-
-IRIS Resolve will not automatically:
-
-- Change a CCR
-- Create a CCR
-- Transport a CCR
-- Start a change session
-- Upload a bundle
-- Retry a transport
-- Modify a target environment
-- Change production source code
-- Resolve an iService ticket
-
-## Confidence scoring
-
-The final confidence percentage will be calculated by Python from validated evidence. The model will not choose the final percentage by itself.
-
-Planned confidence factors include:
-
-| Factor | Maximum contribution |
-|---|---:|
-| Ticket title present | `0.05` |
-| Ticket description present | `0.10` |
-| CCR reference present | `0.05` |
-| CCR details retrieved | `0.15` |
-| Transport-log evidence found | `0.25` |
-| Root cause supported by evidence | `0.20` |
-| Diagnostic checks available | `0.10` |
-| No conflicting evidence | `0.10` |
-
-Planned thresholds:
-
-| Confidence | Result |
-|---|---|
-| `0.85` to `1.00` | `PROPOSE_RESOLUTION` |
-| `0.65` to `0.84` | `PROPOSE_DIAGNOSTICS` |
-| `0.40` to `0.64` | `REQUEST_INFORMATION` |
-| Below `0.40` | `NEEDS_INVESTIGATION` |
-
-## CCR provider modes
-
-IRIS Resolve uses a provider abstraction with two modes.
-
-### Synthetic provider
-
-```env
-CCR_PROVIDER=synthetic
-```
-
-This is the default public demonstration mode.
-
-The provider reads synthetic CCR data from:
-
-```text
-test_data/ccr/
-```
-
-This mode:
-
-- Performs no network calls
-- Uses no internal credentials
-- Does not contact a real CCR system
-- Cannot create or update a CCR
-- Is reproducible for competition reviewers
-- Provides stable evidence for testing
-
-### Live API provider
-
-```env
-CCR_PROVIDER=api
-```
-
-The live provider is disabled.
-
-The provider raises a controlled configuration error until the CCR service owner supplies:
-
-- An approved base URL
-- Approved read-only endpoints
-- An authentication method
-- A read-only API scope
-- Required request headers
-- A documented response schema
-- Rate limits
-- Permission for competition or open-source use
-
-No live CCR URL or credential is included in this repository.
-
-## Project structure
-
-```text
-iris-resolve-agent/
-├── src/
-│   ├── SupportAgent/
-│   │   ├── Production.cls
-│   │   ├── ResolutionOperation.cls
-│   │   ├── ResolutionProcess.cls
-│   │   ├── ResolutionRecord.cls
-│   │   ├── ResolutionResponse.cls
-│   │   ├── Setup.cls
-│   │   ├── TicketRequest.cls
-│   │   └── TicketService.cls
-│   │
-│   └── python/
-│       ├── ccr_provider.py
-│       ├── solver.py
-│       ├── ticket_mcp_server.py
-│       └── langchain_intersystems-0.0.1-py3-none-any.whl
-│
-├── test_data/
-│   ├── ccr/
-│   │   ├── SYNTH-CCR-1001-details.json
-│   │   └── SYNTH-CCR-1001-transport.json
-│   └── tickets/
-│
-├── .env
-├── .env.example
-├── .gitignore
-├── docker-compose.yml
-├── LICENSE
-├── README.md
-└── submit_ticket.py
-```
-
-Some files shown above are placeholders or are still being implemented.
-
-The following local content is excluded from Git:
-
-```text
-.env
-Wheel packages
-Python cache directories
-Compiled Python cache files
-Local logs
-Temporary files
-```
-
-## Prerequisites
-
-The current development environment requires:
-
-- Docker Desktop using Linux containers
-- Git
-- Python for local syntax checks
-- InterSystems IRIS Community with AI Hub
-- Access to the InterSystems AI Hub Early Access Program
-- The `langchain_intersystems` wheel
-- An AWS Bedrock API key for the AI solver stage
-- Access to the configured AWS Bedrock model
-
-This project was developed using:
-
-```text
-iris-community-2027.1.0AI.109.0-docker.tar.gz
-```
-
-> Confirm that the selected AI Hub EAP build is accepted by the competition organisers before final submission.
-
-## Installation
-
-### 1. Clone the repository
-
-```cmd
-git clone https://github.com/munraj-bal/iris-resolve-agent.git
-cd iris-resolve-agent
-```
-
-### 2. Download the IRIS AI Hub image
-
-Download the x64 IRIS Community AI Hub Docker image from the InterSystems AI Hub Early Access portal.
-
-The current development image is:
-
-```text
-iris-community-2027.1.0AI.109.0-docker.tar.gz
-```
-
-Store the image archive outside the Git repository.
-
-Example:
-
-```text
-C:\Users\your-user\Documents\iris_images\
-```
-
-Load the image:
-
-```cmd
-docker image load -i "C:\Users\your-user\Documents\iris_images\iris-community-2027.1.0AI.109.0-docker.tar.gz"
-```
-
-Expected output includes:
-
-```text
-Loaded image: docker.iscinternal.com/docker-intersystems/intersystems/iris-community:2027.1.0AI.109.0
-```
-
-Confirm the image exists:
-
-```cmd
-docker images
-```
-
-### 3. Download the InterSystems LangChain wheel
-
-Download:
+The following wheel must be placed in `src/python`:
 
 ```text
 langchain_intersystems-0.0.1-py3-none-any.whl
 ```
 
-from the InterSystems AI Hub Early Access portal.
+The wheel is distributed through the InterSystems Early Access Program and is excluded from Git.
 
-Place the wheel in:
+### Private environment configuration
 
-```text
-src\python\langchain_intersystems-0.0.1-py3-none-any.whl
-```
-
-The wheel is excluded from Git because it is distributed through the InterSystems Early Access Program.
-
-### 4. Create the private environment file
-
-Copy the example:
+Create the private environment file:
 
 ```cmd
 copy .env.example .env
 ```
 
-Edit `.env`:
+Edit it:
 
 ```cmd
 notepad .env
@@ -374,85 +62,102 @@ Replace the password placeholder privately.
 
 Do not commit `.env`.
 
-The committed `.env.example` contains placeholders only:
+### Build the custom image
 
-```env
-IRIS_PASSWORD=replace_with_your_local_IRIS_password
-CCR_PROVIDER=synthetic
+Build the Docker image:
+
+```cmd
+docker compose build
 ```
 
-### 5. Review Docker Compose
+Use a clean build when testing Dockerfile changes:
 
-The current `docker-compose.yml` is:
-
-```yaml
-name: iris-resolve-agent
-
-services:
-  iris:
-    image: docker.iscinternal.com/docker-intersystems/intersystems/iris-community:2027.1.0AI.109.0
-    pull_policy: never
-    container_name: iris-ai-hub
-    environment:
-      IRIS_PASSWORD: "${IRIS_PASSWORD}"
-      CCR_PROVIDER: "${CCR_PROVIDER:-synthetic}"
-    ports:
-      - "9091:1972"
-      - "9092:52773"
-    volumes:
-      - ./src:/opt/irisapp/src
-      - ./test_data:/opt/irisapp/test_data:ro
+```cmd
+docker compose build --no-cache
 ```
 
-### 6. Start the container
+### Start the container
+
+Start IRIS Resolve:
 
 ```cmd
 docker compose up -d
+```
+
+Check its status:
+
+```cmd
 docker compose ps
 ```
 
-Wait until the status shows:
+Wait for `iris-ai-hub` to report `healthy`.
+
+### Persistent IRIS data
+
+Docker Compose uses the named volume:
 
 ```text
-healthy
+iris-mgr
 ```
 
-Confirm the environment variables without printing the password:
+This preserves:
+
+- The IRIS database
+- The `_SYSTEM` password state
+- Compiled application classes
+- IRIS Wallet entries
+- Amazon Bedrock credentials stored in the Wallet
+- AI Hub model configuration
+- MCP server configuration
+
+A normal container recreation retains this information.
+
+Do not use:
 
 ```cmd
-docker exec iris-ai-hub python3 -c "import os; print('IRIS password set:', bool(os.getenv('IRIS_PASSWORD'))); print('CCR provider:', os.getenv('CCR_PROVIDER'))"
+docker compose down -v
+```
+
+The `-v` option deletes the persistent volume and removes the saved IRIS configuration.
+
+### Verify the Python dependencies
+
+Run:
+
+```cmd
+docker exec iris-ai-hub python3 -c "import iris,langchain,langchain_aws,langchain_intersystems; print('All Python dependencies available')"
 ```
 
 Expected:
 
 ```text
-IRIS password set: True
-CCR provider: synthetic
+All Python dependencies available
 ```
 
-### 7. Set the local IRIS password
+### Verify the IRIS connection
 
-Open:
+Run:
+
+```cmd
+docker exec iris-ai-hub python3 -c "import os,iris; c=iris.connect('localhost',1972,'USER','_SYSTEM',os.environ['IRIS_PASSWORD']); print('IRIS connection successful'); c.close()"
+```
+
+Expected:
 
 ```text
-http://localhost:9092/csp/sys/UtilHome.csp
+IRIS connection successful
 ```
 
-For a new container, sign in with:
+If IRIS returns `Access Denied`, confirm that the `_SYSTEM` password in IRIS matches the value in `.env`.
 
-```text
-Username: _SYSTEM
-Password: SYS
-```
+### Initial IRIS setup
 
-Change the `_SYSTEM` password to the exact value stored in `.env`.
-
-## Testing the ticket models
+The following steps are required once when creating a fresh `iris-mgr` volume.
 
 Open the IRIS terminal:
 
 ```cmd
-docker exec -it iris-ai-hub iris session iris
+docker exec -it iris-ai-hub iris session IRIS -U USER
 ```
 
 The prompt should show:
@@ -461,19 +166,24 @@ The prompt should show:
 USER>
 ```
 
-If required:
-
-```objectscript
-ZN "USER"
-```
-
-Compile the request model:
+Compile the request class:
 
 ```objectscript
 Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/TicketRequest.cls","ck")
 ```
 
-Compile
+Compile the response class:
+
+```objectscript
+Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/ResolutionResponse.cls","ck")
+```
+
+Compile the persisted resolution record:
+
+```objectscript
+Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/ResolutionRecord.cls","ck")
+```
+
 Compile the resolution process:
 
 ```objectscript
@@ -486,222 +196,165 @@ Compile the setup class:
 Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/Setup.cls","ck")
 ```
 
-Confirm the classes exist:
+Compile the production classes when required:
 
 ```objectscript
-Write ##class(%Dictionary.ClassDefinition).%ExistsId("SupportAgent.TicketRequest"),!
-Write ##class(%Dictionary.ClassDefinition).%ExistsId("SupportAgent.ResolutionResponse"),!
-Write ##class(%Dictionary.ClassDefinition).%ExistsId("SupportAgent.ResolutionRecord"),!
-Write ##class(%Dictionary.ClassDefinition).%ExistsId("SupportAgent.ResolutionProcess"),!
-Write ##class(%Dictionary.ClassDefinition).%ExistsId("SupportAgent.Setup"),!
+Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/TicketService.cls","ck")
+Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/ResolutionOperation.cls","ck")
+Do $SYSTEM.OBJ.Load("/opt/irisapp/src/SupportAgent/Production.cls","ck")
+```
+
+### Register the AI Hub descriptors
+
+Register the model and MCP configuration descriptors:
+
+```objectscript
+Do ##class(%ConfigStore.DescriptorManager).RebuildRegistry()
+```
+
+Confirm the LLM descriptor:
+
+```objectscript
+Set descriptorClass = ""
+Set sc = ##class(%ConfigStore.DescriptorManager).GetDescriptorClass("AI","LLM","",.descriptorClass)
+Do $SYSTEM.Status.DisplayError(sc)
+Write "LLM descriptor: ",descriptorClass,!
 ```
 
 Expected:
 
 ```text
-1
-1
-1
-1
-1
+LLM descriptor: %AI.ConfigStore.LLMDescriptor
 ```
 
-### Test request JSON conversion
+Confirm the MCP descriptor:
 
 ```objectscript
-Set request = ##class(SupportAgent.TicketRequest).%New()
-Set request.TicketID = "SYNTH-I615950"
-Set request.Title = "Cancellation message was not generated"
-Set request.Description = "After cancellation, no SIU_S15 message appeared in the outbound trace."
-Set request.CCRID = "SYNTH-CCR-1001"
-Set request.Environment = "TEST"
-Write request.ToJSON(),!
+Set descriptorClass = ""
+Set sc = ##class(%ConfigStore.DescriptorManager).GetDescriptorClass("AI","MCP","",.descriptorClass)
+Do $SYSTEM.Status.DisplayError(sc)
+Write "MCP descriptor: ",descriptorClass,!
 ```
 
 Expected:
 
-```json
-{"ticket_id":"SYNTH-I615950","title":"Cancellation message was not generated","description":"After cancellation, no SIU_S15 message appeared in the outbound trace.","ccr_id":"SYNTH-CCR-1001","environment":"TEST"}
+```text
+MCP descriptor: %AI.ConfigStore.MCPDescriptor
 ```
 
-Remove the temporary object:
+### Initialise Amazon Bedrock and MCP
+
+Run the setup method using a private Amazon Bedrock API key:
 
 ```objectscript
-Kill request
+Set sc = ##class(SupportAgent.Setup).Init("YOUR_PRIVATE_BEDROCK_API_KEY")
+Do $SYSTEM.Status.DisplayError(sc)
 ```
 
-This test does not save or send anything.
+Do not commit, paste, log, or share the real API key.
 
-## Testing the CCR provider
+The setup creates:
 
-Leave the IRIS terminal:
+- The `SingleKeyAuth.claude` IRIS Wallet secret
+- The `AI.LLM.claude_single` model configuration
+- The `AI.MCP.ticket_tools` MCP configuration
+
+Expected:
+
+```text
+IRIS Resolve Bedrock and Config Store initialised successfully!
+```
+
+Exit the IRIS terminal:
 
 ```objectscript
 Halt
 ```
 
-### Check Python syntax
+### Confirm the compiled classes
+
+At the `USER>` prompt, the following commands should each return `1`:
+
+```objectscript
+Write "TicketRequest: ",##class(%Dictionary.ClassDefinition).%ExistsId("SupportAgent.TicketRequest"),!
+Write "ResolutionResponse: ",##class(%Dictionary.ClassDefinition).%ExistsId("SupportAgent.ResolutionResponse"),!
+Write "ResolutionRecord: ",##class(%Dictionary.ClassDefinition).%ExistsId("SupportAgent.ResolutionRecord"),!
+Write "ResolutionProcess: ",##class(%Dictionary.ClassDefinition).%ExistsId("SupportAgent.ResolutionProcess"),!
+Write "Setup: ",##class(%Dictionary.ClassDefinition).%ExistsId("SupportAgent.Setup"),!
+```
+
+### Test the solver
+
+Run the synthetic end-to-end test:
 
 ```cmd
-python -m py_compile src\python\ccr_provider.py
+docker exec iris-ai-hub python3 -c "import json,solver; payload=json.dumps({'ticket_id':'SYNTH-I615950','title':'Cancellation message was not generated','description':'After cancellation, no SIU_S15 message appeared in the outbound trace. Check whether the associated CCR was fully transported.','ccr_id':'SYNTH-CCR-1001','environment':'TEST'}); result=solver.process_ticket(payload); print(json.dumps(json.loads(result),indent=2))"
 ```
 
-No output means the syntax is valid.
+A successful result should contain:
 
-### Confirm fixtures are mounted
-
-```cmd
-docker exec iris-ai-hub ls -la /opt/irisapp/test_data/ccr
+```json
+{
+  "ccr_details_retrieved": true,
+  "ccr_transport_logs_retrieved": true,
+  "ccr_provider": "synthetic",
+  "requires_human_approval": true,
+  "automatic_changes_performed": false,
+  "status": "COMPLETED"
+}
 ```
 
-Expected:
+The synthetic CCR provider reads local test fixtures. It does not call or modify the real CCR system.
 
-```text
-SYNTH-CCR-1001-details.json
-SYNTH-CCR-1001-transport.json
-```
+### Read-only safety
 
-### Retrieve synthetic CCR details
+IRIS Resolve currently uses read-only support tools.
 
-```cmd
-docker exec iris-ai-hub python3 -c "import sys,asyncio,json; sys.path.insert(0,'/opt/irisapp/src/python'); from ccr_provider import get_ccr_provider; provider=get_ccr_provider(); result=asyncio.run(provider.get_details('SYNTH-CCR-1001')); print('Provider:',provider.provider_name); print(json.dumps(result,indent=2))"
-```
+The agent can:
 
-Expected:
+- Read synthetic ticket details
+- Read synthetic CCR details
+- Read synthetic CCR transport logs
+- Propose diagnostics
+- Identify missing evidence
+- Recommend actions for human review
 
-```text
-Provider: synthetic
-```
+The agent does not:
+
+- Retry CCR transports
+- Change CCR item sets
+- Modify ticket records
+- Send outbound HL7 messages
+- Apply production configuration changes
+- Perform automatic corrective actions
 
 The result includes:
 
-```text
-CCR ID: SYNTH-CCR-1001
-Status: Executed
-Environment: TEST
-ITEM-001: Completed
-ITEM-002: Pending
+```json
+{
+  "requires_human_approval": true,
+  "automatic_changes_performed": false
+}
 ```
 
-### Retrieve synthetic transport logs
+### Rebuilding after dependency changes
+
+After changing `Dockerfile`, `requirements.txt`, or the InterSystems wheel, rebuild the image:
 
 ```cmd
-docker exec iris-ai-hub python3 -c "import sys,asyncio,json; sys.path.insert(0,'/opt/irisapp/src/python'); from ccr_provider import get_ccr_provider; provider=get_ccr_provider(); result=asyncio.run(provider.get_transport_logs('SYNTH-CCR-1001')); print(json.dumps(result,indent=2))"
+docker compose build --no-cache
 ```
 
-Expected evidence identifiers:
-
-```text
-SYNTH-CCR-1001-LOG-001
-SYNTH-CCR-1001-LOG-002
-```
-
-### Test an unknown CCR
+Recreate the container without deleting the persistent volume:
 
 ```cmd
-docker exec iris-ai-hub python3 -c "import sys,asyncio; sys.path.insert(0,'/opt/irisapp/src/python'); from ccr_provider import get_ccr_provider; provider=get_ccr_provider(); asyncio.run(provider.get_details('SYNTH-CCR-9999'))"
+docker compose up -d --force-recreate
 ```
 
-Expected:
-
-```text
-CCRNotFoundError
-```
-
-### Test invalid identifier protection
+Check its status:
 
 ```cmd
-docker exec iris-ai-hub python3 -c "import sys; sys.path.insert(0,'/opt/irisapp/src/python'); from ccr_provider import validate_ccr_id; validate_ccr_id('../../etc/passwd')"
+docker compose ps
 ```
 
-Expected:
-
-```text
-ValueError
-```
-
-### Confirm live access is disabled
-
-```cmd
-docker exec iris-ai-hub python3 -c "import sys,asyncio; sys.path.insert(0,'/opt/irisapp/src/python'); from ccr_provider import get_ccr_provider; provider=get_ccr_provider('api'); asyncio.run(provider.get_details('SCFI5105'))"
-```
-
-Expected:
-
-```text
-CCRConfigurationError
-```
-
-## Security
-
-- Never commit `.env`.
-- Never commit an AWS Bedrock API key.
-- Never hard-code the IRIS `_SYSTEM` password.
-- Never print secret values during environment checks.
-- Never publish internal CCR URLs.
-- Never publish CCR credentials.
-- Never include real iService ticket data.
-- Never include customer or patient information.
-- Keep CCR MCP tools read-only.
-- Require human review for all proposed resolutions.
-- Rotate exposed credentials.
-
-## Development status
-
-### Completed
-
-- [x] Rename project to IRIS Resolve
-- [x] Define ticket request model
-- [x] Define resolution response model
-- [x] Define persistent resolution record
-- [x] Convert ticket request to JSON
-- [x] Implement synthetic read-only CCR provider
-- [x] Validate CCR identifiers
-- [x] Normalise CCR details
-- [x] Normalise CCR transport logs
-- [x] Reject unknown CCR fixtures
-- [x] Reject unsafe CCR identifiers
-- [x] Disable unapproved live CCR access
-- [x] Mount synthetic CCR fixtures as read-only
-- [x] Refactor the process and setup namespaces
-
-### In progress
-
-- [ ] Implement read-only CCR MCP tools
-- [ ] Implement resolution policy MCP tool
-- [ ] Implement diagnostic-check MCP tool
-- [ ] Implement `solver.py`
-- [ ] Connect `solver.py` to IRIS AI Hub
-- [ ] Implement deterministic confidence scoring
-- [ ] Implement `ResolutionOperation.cls`
-- [ ] Implement `TicketService.cls`
-- [ ] Implement `Production.cls`
-- [ ] Implement `submit_ticket.py`
-- [ ] Add synthetic ticket fixtures
-- [ ] Demonstrate the workflow in IRIS Message Trace
-- [ ] Add automated tests
-- [ ] Add a reproducible container build
-- [ ] Record a demonstration video
-
-## Competition qualification target
-
-The finished application is intended to demonstrate:
-
-- InterSystems IRIS AI Hub model configuration
-- An AI agent performing a decision-making task
-- Autonomous MCP tool selection
-- Read-only CCR evidence retrieval
-- Deterministic confidence scoring
-- An IRIS Interoperability Business Service
-- An IRIS Interoperability Business Process
-- An IRIS Interoperability Business Operation
-- Persistent evidence and decisions in IRIS
-- End-to-end IRIS Message Trace
-- Synthetic data for reproducible judging
-- Human approval before operational action
-
-The project is not competition-complete until the Interoperability production and Message Trace work end to end.
-
-## License
-
-This project is licensed under the MIT License. See `LICENSE`.
+Do not use `docker compose down -v`.

@@ -1,14 +1,26 @@
+name: iris-resolve-agent
+
 services:
   iris:
-    image: docker.iscinternal.com/docker-intersystems/intersystems/iris-community:2027.1.0AI.109.0
-    pull_policy: never
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: iris-resolve-agent:local
     container_name: iris-ai-hub
+
     environment:
       IRIS_PASSWORD: "${IRIS_PASSWORD}"
       CCR_PROVIDER: "${CCR_PROVIDER:-synthetic}"
+      PYTHONPATH: "/opt/irisapp/python-packages:/opt/irisapp/src/python"
+
     ports:
       - "9091:1972"
       - "9092:52773"
+
     volumes:
       - ./src:/opt/irisapp/src
       - ./test_data:/opt/irisapp/test_data:ro
+      - iris-mgr:/usr/irissys/mgr
+
+volumes:
+  iris-mgr:
