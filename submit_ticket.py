@@ -367,8 +367,8 @@ def display_result(
         result.get("risks", []),
     )
     display_list(
-        "Proposed diagnostic checks",
-        result.get("diagnostic_check_ids", []),
+        "Investigation areas",
+        result.get("investigation_areas", []),
     )
 
     print("\n" + "=" * 72)

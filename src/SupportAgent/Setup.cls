@@ -11,7 +11,7 @@ ClassMethod Init(apiKey As %String) As %Status
     Do ##class(Security.Resources).Create("%MyUseResource")
     Do ##class(Security.Resources).Create("%MyEditResource")
 
-    // Create the Wallet collection for AWS credentials.
+    // Create the Wallet collection for the Bedrock credential.
     Do ##class(%Wallet.Collection).Create(
         "SingleKeyAuth",
         {
@@ -37,24 +37,15 @@ ClassMethod Init(apiKey As %String) As %Status
         Quit sc
     }
 
-    // Switch to USER and create the IRIS AI Hub configurations.
     Set $NAMESPACE = "USER"
 
+    Do ##class(%ConfigStore.DescriptorManager).RebuildRegistry()
+
+    // Replace the existing model configuration.
     Do ##class(%ConfigStore.Configuration).Delete(
         "AI.LLM.claude_single"
     )
 
-    // Remove the old AutoSchema MCP configuration if it exists.
-    Do ##class(%ConfigStore.Configuration).Delete(
-        "AI.MCP.schema_tools"
-    )
-
-    // Remove the current IRIS Resolve configuration if it exists.
-    Do ##class(%ConfigStore.Configuration).Delete(
-        "AI.MCP.ticket_tools"
-    )
-
-    // Create the AWS Bedrock model configuration.
     Set bedrockConfig = {
         "model_provider": "bedrock_converse",
         "model": "eu.anthropic.claude-sonnet-5-5",
@@ -76,33 +67,11 @@ ClassMethod Init(apiKey As %String) As %Status
         Quit sc
     }
 
-    // Create the read-only ticket and CCR MCP configuration.
-    Set mcpConfig = {
-        "command": "python3",
-        "args": [
-            "/opt/irisapp/src/python/ticket_mcp_server.py"
-        ],
-        "transport": "stdio"
-    }
-
-    Set sc = ##class(%ConfigStore.Configuration).Create(
-        "AI",
-        "MCP",
-        "",
-        "ticket_tools",
-        mcpConfig
-    )
-
-    If $SYSTEM.Status.IsError(sc) {
-        Do $SYSTEM.Status.DisplayError(sc)
-        Quit sc
-    }
-
     Write !,
-        "IRIS Resolve Bedrock and Config Store initialised successfully!",
+        "IRIS Resolve Bedrock model initialised successfully!",
         !
 
-    Quit $$$OK
+    Quit $SYSTEM.Status.OK()
 }
 
 }

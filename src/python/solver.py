@@ -7,22 +7,23 @@ import json
 import traceback
 from typing import Any
 
-from agent_runner import run_agent
-from config import DEFAULT_LLM_CONFIG
-from decisions import validate_agent_result
-from results import (
+from agent import DEFAULT_LLM_CONFIG, run_agent
+from policy import (
     missing_information_result,
     rejected_result,
     technical_failure_result,
+    validate_agent_result,
 )
-from ticket_validation import (
+from validation import (
     detect_instruction_injection,
     find_missing_fields,
     parse_ticket,
 )
 
 
-def encode(result: dict[str, Any]) -> str:
+def encode(
+    result: dict[str, Any],
+) -> str:
     """Serialise a solver result."""
     return json.dumps(
         result,
@@ -71,7 +72,7 @@ def process_ticket(
         )
 
     try:
-        agent_result, diagnostics = asyncio.run(
+        agent_result = asyncio.run(
             run_agent(
                 ticket,
                 llm_config_name,
@@ -81,7 +82,6 @@ def process_ticket(
         result = validate_agent_result(
             ticket,
             agent_result,
-            diagnostics,
         )
     except Exception as exc:
         print(traceback.format_exc())

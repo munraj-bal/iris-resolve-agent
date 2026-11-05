@@ -4,18 +4,38 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Final
 
-from config import (
-    FIELD_LIMITS,
-    INJECTION_PHRASES,
-    REQUIRED_TICKET_FIELDS,
+
+FIELD_LIMITS: Final[dict[str, int]] = {
+    "ticket_id": 100,
+    "title": 1000,
+    "description": 20_000,
+    "ccr_id": 100,
+    "application": 200,
+    "site": 200,
+    "iris_namespace": 100,
+    "affected_identifier": 500,
+    "expected_interface": 500,
+    "relevant_time": 500,
+    "additional_evidence": 50_000,
+    "environment": 100,
+}
+
+REQUIRED_FIELDS: Final[tuple[str, ...]] = (
+    "title",
+    "description",
 )
 
-
-INJECTION_PATTERNS = tuple(
+INJECTION_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
     re.compile(pattern, re.IGNORECASE)
-    for pattern in INJECTION_PHRASES
+    for pattern in (
+        r"\bignore\s+(all\s+)?previous\s+instructions\b",
+        r"\breveal\s+(the\s+)?system\s+prompt\b",
+        r"\bdeveloper\s+message\b",
+        r"\bdisable\s+(the\s+)?safety\b",
+        r"\bbypass\s+(the\s+)?policy\b",
+    )
 )
 
 
@@ -33,6 +53,34 @@ def normalise_text(
         )
 
     return str(value).strip()[:maximum_length]
+
+
+def normalise_string_list(
+    value: Any,
+    *,
+    maximum_items: int = 20,
+    maximum_length: int = 2000,
+    uppercase: bool = False,
+) -> list[str]:
+    """Normalise and de-duplicate a list of strings."""
+    if not isinstance(value, list):
+        return []
+
+    results: list[str] = []
+
+    for item in value[:maximum_items]:
+        if not isinstance(item, str):
+            continue
+
+        text = item.strip()[:maximum_length]
+
+        if uppercase:
+            text = text.upper()
+
+        if text and text not in results:
+            results.append(text)
+
+    return results
 
 
 def parse_ticket(
@@ -66,7 +114,7 @@ def find_missing_fields(
     """Return required fields containing no value."""
     return [
         field
-        for field in REQUIRED_TICKET_FIELDS
+        for field in REQUIRED_FIELDS
         if not ticket.get(field)
     ]
 
@@ -87,31 +135,3 @@ def detect_instruction_injection(
         )
 
     return None
-
-
-def normalise_string_list(
-    value: Any,
-    *,
-    maximum_items: int = 20,
-    maximum_length: int = 2000,
-    uppercase: bool = False,
-) -> list[str]:
-    """Normalise a model-produced list of strings."""
-    if not isinstance(value, list):
-        return []
-
-    results: list[str] = []
-
-    for item in value[:maximum_items]:
-        if not isinstance(item, str):
-            continue
-
-        text = item.strip()[:maximum_length]
-
-        if uppercase:
-            text = text.upper()
-
-        if text and text not in results:
-            results.append(text)
-
-    return results

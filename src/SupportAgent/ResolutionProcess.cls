@@ -1,6 +1,7 @@
 Class SupportAgent.ResolutionProcess Extends Ens.BusinessProcess
 {
 
+/// Receives a ticket from the Business Service and returns the AI result.
 Method OnRequest(
     pRequest As SupportAgent.TicketRequest,
     Output pResponse As SupportAgent.ResolutionResponse
@@ -13,6 +14,13 @@ Method OnRequest(
         )
     }
 
+    If pRequest.RawTicketJSON = "" {
+        Quit $SYSTEM.Status.Error(
+            5001,
+            "IRIS Resolve Process received an empty ticket payload."
+        )
+    }
+
     Set pResponse = ##class(SupportAgent.ResolutionResponse).%New()
 
     If '$IsObject(pResponse) {
@@ -22,14 +30,14 @@ Method OnRequest(
         )
     }
 
-    Set pResponse.TicketID = pRequest.TicketID
     Set pResponse.ResolutionJSON = ..SolveTicket(
-        pRequest.ToJSON()
+        pRequest.RawTicketJSON
     )
 
     Quit $SYSTEM.Status.OK()
 }
 
+/// Invokes the Python solver through Embedded Python.
 ClassMethod SolveTicket(
     rawTicketJSON As %String
 ) As %String [ Language = python ]
