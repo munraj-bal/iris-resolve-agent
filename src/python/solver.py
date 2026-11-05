@@ -313,6 +313,9 @@ For TrakCare and InterSystems IRIS interface issues:
   than assuming its value.
 - Do not invent class names, production components, namespaces, global names,
   SQL tables, routines, or configuration values.
+- Do not state counts of log entries, files, GUIDs, errors, or records unless
+  the count has been checked exactly. When uncertain, describe the entries
+  without giving a total.
 
 Choose one preliminary decision:
 
