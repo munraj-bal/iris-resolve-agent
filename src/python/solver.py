@@ -295,6 +295,25 @@ Required investigation rules:
 9. Never claim that a real system was modified.
 10. Human approval is required for every proposed resolution.
 
+For TrakCare and InterSystems IRIS interface issues:
+
+- Identify the application, site, environment, and IRIS namespace.
+- Identify the episode, appointment, order, message, or other transaction ID.
+- Establish the exact event timestamp and expected message type.
+- Distinguish between event creation, message generation, routing, filtering,
+  suppression, queueing, and transmission.
+- Do not treat absence from a trace as proof that a message was never created
+  until the trace namespace, production component, filters, and time range
+  are confirmed.
+- When possible, compare the failing transaction with a successful transaction
+  of the same type.
+- Recommend precise read-only checks, including the expected system area and
+  evidence required.
+- When important context is absent, list the specific missing field rather
+  than assuming its value.
+- Do not invent class names, production components, namespaces, global names,
+  SQL tables, routines, or configuration values.
+
 Choose one preliminary decision:
 
 - PROPOSE_RESOLUTION
@@ -388,6 +407,34 @@ def parse_ticket(raw_ticket_json: str) -> dict[str, Any]:
             payload.get("environment"),
             maximum_length=100,
         ),
+                "application": normalise_optional_text(
+            payload.get("application"),
+            maximum_length=200,
+        ),
+        "site": normalise_optional_text(
+            payload.get("site"),
+            maximum_length=200,
+        ),
+        "iris_namespace": normalise_optional_text(
+            payload.get("iris_namespace"),
+            maximum_length=100,
+        ),
+        "trakcare_environment": normalise_optional_text(
+            payload.get("trakcare_environment"),
+            maximum_length=100,
+        ),
+        "affected_identifier": normalise_optional_text(
+            payload.get("affected_identifier"),
+            maximum_length=500,
+        ),
+        "expected_interface": normalise_optional_text(
+            payload.get("expected_interface"),
+            maximum_length=500,
+        ),
+        "relevant_time": normalise_optional_text(
+            payload.get("relevant_time"),
+            maximum_length=500,
+        ),
     }
 
 
@@ -412,6 +459,13 @@ def detect_instruction_injection(
         [
             str(ticket.get("title") or ""),
             str(ticket.get("description") or ""),
+            str(ticket.get("application") or ""),
+            str(ticket.get("site") or ""),
+            str(ticket.get("iris_namespace") or ""),
+            str(ticket.get("trakcare_environment") or ""),
+            str(ticket.get("affected_identifier") or ""),
+            str(ticket.get("expected_interface") or ""),
+            str(ticket.get("relevant_time") or ""),
             str(ticket.get("additional_evidence") or ""),
         ]
     )
@@ -869,7 +923,10 @@ def select_final_decision(
     if preliminary_decision == "REJECT":
         return "REJECT"
 
-    if missing_information:
+    if (
+        missing_information
+        and preliminary_decision == "REQUEST_INFORMATION"
+    ):
         return "REQUEST_INFORMATION"
 
     if confidence >= 0.85 and evidence_count > 0:

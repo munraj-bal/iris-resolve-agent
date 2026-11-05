@@ -12,6 +12,13 @@ from typing import Any
 CONTAINER_NAME = "iris-ai-hub"
 
 
+def configure_console_encoding() -> None:
+    """Configure UTF-8 output when supported."""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+
 def prompt_required(label: str) -> str:
     """Prompt until the user provides a non-empty value."""
     while True:
@@ -93,13 +100,42 @@ def create_payload() -> dict[str, str]:
         "CCR ID, if applicable"
     )
 
+    application = prompt_optional(
+        "Application or product, for example TrakCare"
+    )
+
+    site = prompt_optional(
+        "Site or customer"
+    )
+
+    iris_namespace = prompt_optional(
+        "IRIS namespace"
+    )
+
+    trakcare_environment = prompt_optional(
+        "TrakCare environment"
+    )
+
+    affected_identifier = prompt_optional(
+        "Affected episode, appointment, order, or message ID"
+    )
+
+    expected_interface = prompt_optional(
+        "Expected interface or message type"
+    )
+
+    relevant_time = prompt_optional(
+        "Relevant timestamp or time range"
+    )
+
     additional_evidence = prompt_multiline(
         "Additional evidence, if available",
         required=False,
         instructions=(
-            "Paste transport logs, outbound traces, Find GUID output, "
-            "SQL results, configuration details, error messages, or "
-            "previous investigation notes. Enter END immediately to skip."
+            "Paste outbound traces, transport logs, Find GUID output, "
+            "SQL results, error messages, configuration details, "
+            "queue status, successful comparison cases, or previous "
+            "investigation notes. Enter END immediately to skip."
         ),
     )
 
@@ -112,6 +148,13 @@ def create_payload() -> dict[str, str]:
         "title": title,
         "description": description,
         "ccr_id": ccr_id,
+        "application": application,
+        "site": site,
+        "iris_namespace": iris_namespace,
+        "trakcare_environment": trakcare_environment,
+        "affected_identifier": affected_identifier,
+        "expected_interface": expected_interface,
+        "relevant_time": relevant_time,
         "additional_evidence": additional_evidence,
         "environment": environment,
     }
@@ -127,6 +170,32 @@ def confirm_submission(payload: dict[str, str]) -> bool:
     print(f"Title:       {payload['title']}")
     print(f"CCR ID:      {payload['ccr_id'] or 'Not supplied'}")
     print(f"Environment: {payload['environment']}")
+    print(
+        f"Application: {payload['application'] or 'Not supplied'}"
+    )
+    print(
+        f"Site:        {payload['site'] or 'Not supplied'}"
+    )
+    print(
+        f"Namespace:   {payload['iris_namespace'] or 'Not supplied'}"
+    )
+    print(
+        "TrakCare environment: "
+        f"{payload['trakcare_environment'] or 'Not supplied'}"
+    )
+    print(
+        "Affected identifier:  "
+        f"{payload['affected_identifier'] or 'Not supplied'}"
+    )
+    print(
+        "Expected interface:   "
+        f"{payload['expected_interface'] or 'Not supplied'}"
+    )
+    print(
+        "Relevant time:        "
+        f"{payload['relevant_time'] or 'Not supplied'}"
+    )
+
 
     print("\nDescription:")
     print(payload["description"])
@@ -353,6 +422,8 @@ def display_result(result: dict[str, Any]) -> None:
 
 def main() -> int:
     """Run the interactive CLI."""
+    configure_console_encoding()
+
     try:
         payload = create_payload()
 
