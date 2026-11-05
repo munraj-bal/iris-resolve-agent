@@ -918,6 +918,9 @@ def select_final_decision(
     if preliminary_decision == "REJECT":
         return "REJECT"
 
+    if preliminary_decision == "NEEDS_INVESTIGATION":
+        return "NEEDS_INVESTIGATION"
+
     if (
         missing_information
         and preliminary_decision == "REQUEST_INFORMATION"
@@ -929,9 +932,6 @@ def select_final_decision(
 
     if confidence >= 0.65 and evidence_count > 0:
         return "PROPOSE_DIAGNOSTICS"
-
-    if preliminary_decision == "NEEDS_INVESTIGATION":
-        return "NEEDS_INVESTIGATION"
 
     if confidence >= 0.40:
         return "REQUEST_INFORMATION"
