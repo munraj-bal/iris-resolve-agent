@@ -81,3 +81,4 @@ docs-prototype/.pytest_cache/
 # Python caches
 __pycache__/
 *.pycdocs-prototype/
+docs-prototype/
