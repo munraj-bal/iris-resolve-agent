@@ -1,10 +1,10 @@
 # IRIS Resolve
 
-IRIS Resolve is a read-only support ticket investigation agent built with InterSystems IRIS, IRIS Interoperability, IRIS AI Hub, LangChain, and Amazon Bedrock.
+IRIS Resolve is a read-only support ticket investigation agent built with InterSystems IRIS, IRIS Interoperability, IRIS AI Hub, LangChain, Amazon Bedrock, and a locally indexed copy of public InterSystems documentation.
 
-Users submit ticket details and technical evidence through an interactive command-line interface. The request passes through an IRIS Interoperability production, where an IRIS AI Hub agent analyses the evidence and returns a structured recommendation for human review.
+Users submit ticket details and technical evidence through an interactive command-line interface. The request passes through an IRIS Interoperability production, where IRIS Resolve retrieves relevant official documentation, uses an IRIS AI Hub model to select the most useful sections, analyses the supplied evidence, and returns a structured recommendation for human review.
 
-IRIS Resolve never applies automatic corrective actions.
+IRIS Resolve never performs automatic corrective actions.
 
 ## Key features
 
@@ -15,12 +15,17 @@ IRIS Resolve never applies automatic corrective actions.
 - General and CCR-related ticket support
 - TrakCare and IRIS technical context
 - Evidence-based investigation recommendations
-- Deterministic confidence calculation
+- Locally indexed public InterSystems documentation
+- SQLite FTS5 section-level documentation search
+- Context-aware documentation query expansion
+- AI-assisted documentation reranking
+- Documentation evidence linked by validated section IDs
+- Deterministic structured-output validation and repair
 - Instruction-injection detection
 - Five controlled decision outcomes
 - Message Viewer and Visual Trace support
 - Mandatory human approval
-- No automatic ticket, CCR, data, code, or configuration changes
+- No automatic ticket, CCR, data, code, message, or configuration changes
 
 ## Interoperability workflow
 
@@ -39,17 +44,30 @@ SupportAgent.ResolutionProcess
         v
 solver.process_ticket()
         |
-        v
-IRIS AI Hub
+        +-------------------------------+
+        |                               |
+        v                               v
+Local documentation search         IRIS AI Hub
+        |                               |
+        v                               v
+SQLite FTS5 candidates          Amazon Bedrock
         |
         v
-Amazon Bedrock
+AI documentation reranker
         |
         v
-Deterministic validation
+Validated documentation context
         |
-        | SupportAgent.ResolutionResponse
-        v
+        +---------------+
+                        |
+                        v
+               Main ticket agent
+                        |
+                        v
+       Deterministic policy validation
+                        |
+                        | SupportAgent.ResolutionResponse
+                        v
 SupportAgent.TicketService
         |
         v
@@ -69,13 +87,42 @@ IRIS Resolve returns one of five decisions:
 
 | Decision | Meaning |
 |---|---|
-| `PROPOSE_RESOLUTION` | The supplied evidence supports a likely root cause and a human-reviewed resolution. |
-| `PROPOSE_DIAGNOSTICS` | A focused investigation can be proposed, but more read-only evidence is required. |
+| `PROPOSE_RESOLUTION` | The supplied evidence directly supports a likely root cause and a human-reviewed resolution. |
+| `PROPOSE_DIAGNOSTICS` | A focused read-only investigation can be proposed, but the root cause is not yet established. |
 | `REQUEST_INFORMATION` | Essential ticket or technical information is missing. |
 | `NEEDS_INVESTIGATION` | The evidence is insufficient, inconclusive, or materially conflicting. |
 | `REJECT` | The input is invalid or contains a detected instruction-injection attempt. |
 
-The AI model selects a preliminary decision. Python validates the evidence, calculates confidence, validates the investigation areas, and selects the final decision.
+The AI model selects a preliminary decision. Python then validates the evidence, decision, recommended actions, missing information, investigation areas, and safety properties.
+
+IRIS Resolve does not calculate or display confidence scores.
+
+## Structured-output consistency
+
+Python validates and repairs predictable omissions in the model output.
+
+Examples include:
+
+- `REQUEST_INFORMATION` must contain missing-information items.
+- `PROPOSE_DIAGNOSTICS` must contain read-only recommended actions.
+- `NEEDS_INVESTIGATION` must identify unresolved information or conflicts.
+- `PROPOSE_RESOLUTION` requires a directly supported root cause.
+- `REJECT` must not contain operational recommendations.
+- Selected documentation is included only when it is materially cited by the final agent.
+
+This prevents contradictory output such as:
+
+```text
+Decision: REQUEST_INFORMATION
+Missing information: None
+```
+
+or:
+
+```text
+Decision: PROPOSE_DIAGNOSTICS
+Recommended actions: None
+```
 
 ## Investigation areas
 
@@ -87,37 +134,96 @@ IRIS Resolve classifies recommendations into controlled investigation areas:
 - `FIND_GUID`
 - `CCR_TRANSPORT`
 
-These values categorise the recommended investigation. They do not represent connections to live customer systems.
+These values categorise a recommended investigation. They do not represent live connections to customer systems.
 
-## Confidence calculation
+## Official documentation retrieval
 
-Confidence is calculated deterministically from:
+IRIS Resolve can use public documentation from `docs.intersystems.com` as a read-only reference source.
 
-- Ticket title present
-- Ticket description present
-- Environment present
-- User evidence supplied
-- Root cause supported by evidence
-- Absence of conflicting evidence
+The documentation workflow is:
 
-Current thresholds are:
+```text
+Approved InterSystems documentation URLs
+        |
+        | HTTPS GET only
+        v
+Bounded documentation index build
+        |
+        v
+HTML section extraction
+        |
+        v
+Local SQLite FTS5 database
+        |
+        v
+Context-aware query expansion
+        |
+        v
+Top candidate sections
+        |
+        v
+IRIS AI Hub reranker
+        |
+        v
+Validated documentation evidence
+```
 
-| Decision | Minimum confidence |
-|---|---:|
-| `PROPOSE_RESOLUTION` | 85% |
-| `PROPOSE_DIAGNOSTICS` | 65% |
-| `REQUEST_INFORMATION` | 40% |
+### Documentation safety
 
-Confidence is capped for outcomes where the evidence remains incomplete or conflicting.
+External documentation access is restricted to:
+
+- HTTPS
+- `GET` requests
+- `docs.intersystems.com`
+- Approved documentation paths
+- Bounded page counts and crawl depth
+- Bounded response sizes
+- No authentication
+- No cookies or session tokens
+- No form submission
+- No upload
+- No customer-system access
+- No database updates
+
+The ticket workflow searches the local SQLite database. It does not crawl the documentation site for every ticket.
+
+### Documentation grounding
+
+The documentation reranker can select only section IDs supplied by the local search.
+
+Selected IDs use this format:
+
+```text
+ISC-SECTION-2E9915F33FEE3A35
+```
+
+Python discards:
+
+- Invented section IDs
+- Duplicate selections
+- Unsupported output structures
+- Documentation sections not present in the candidate set
+
+Documentation establishes expected product behaviour only. It does not prove what occurred in a customer environment.
+
+If no relevant documentation exists, IRIS Resolve returns:
+
+```text
+NO_RELEVANT_DOCUMENTATION
+```
+
+It does not force a generic or misleading documentation source into the investigation.
 
 ## Safety model
 
-IRIS Resolve treats ticket content and pasted evidence as untrusted input.
+IRIS Resolve treats ticket content, pasted evidence, and retrieved documentation as untrusted input.
 
 The application can:
 
 - Analyse ticket descriptions
 - Analyse manually pasted technical evidence
+- Retrieve locally indexed public InterSystems documentation
+- Select relevant documentation sections
 - Separate facts from hypotheses
 - Identify missing or contradictory information
 - Classify relevant investigation areas
@@ -136,10 +242,12 @@ The application does not:
 - Execute database updates
 - Modify source code
 - Apply configuration changes
-- Resend interface messages
+- Resend or replay interface messages
+- Purge queues or messages
+- Restart customer productions
 - Perform automatic corrective actions
 
-Every result includes:
+Every completed result includes:
 
 ```json
 {
@@ -150,8 +258,11 @@ Every result includes:
 
 ## Supported evidence
 
-Users can paste evidence such as:
+Users can paste information and evidence such as:
 
+- Affected episode, appointment, order, event, or message identifiers
+- Expected interface or message type
+- Relevant timestamps or time ranges
 - Error messages
 - Application and production logs
 - CCR transport output
@@ -160,7 +271,6 @@ Users can paste evidence such as:
 - SQL query output
 - Configuration details
 - Queue status
-- Relevant timestamps
 - Successful comparison cases
 - Previous investigation notes
 
@@ -174,18 +284,29 @@ IRIS Resolve can assist with investigations such as:
 
 - An expected HL7 message was not generated
 - A message was generated but not routed or transmitted
+- A business operation is not processing queued messages
+- A result attached to an unexpected episode
 - A CCR item set failed during `Load()`
 - A CCR contains missing GUID references
 - A CCR appears to have an incorrect prerequisite
 - A rescheduled appointment lost an association required by an interface
+- A clinical document did not render
 - Ticket communications contain incomplete or contradictory evidence
 
 ## Project structure
 
 ```text
 iris-resolve-agent/
+|-- data/
+|   `-- documentation/
+|       `-- docs.db
 |-- src/
 |   |-- python/
+|   |   |-- documentation/
+|   |   |   |-- __init__.py
+|   |   |   |-- client.py
+|   |   |   |-- index.py
+|   |   |   `-- reranker.py
 |   |   |-- agent.py
 |   |   |-- policy.py
 |   |   |-- solver.py
@@ -207,17 +328,33 @@ iris-resolve-agent/
 `-- submit_ticket.py
 ```
 
+The generated documentation database is excluded from Git.
+
 ## Main components
 
 ### Interactive CLI
 
 `submit_ticket.py` collects ticket details and evidence, displays a review screen, and submits the JSON payload through the IRIS Native API.
 
+The CLI asks for:
+
+- Ticket ID
+- Ticket title
+- Ticket description
+- Optional CCR reference
+- Application or product
+- Site or customer
+- IRIS namespace
+- Additional information and evidence
+- Affected environment
+
+Affected identifiers, message types, timestamps, traces, and other technical details can be included together under **Additional information and evidence**.
+
 The CLI does not call the Python solver directly.
 
 ### Business Service
 
-`SupportAgent.TicketService` is the entry point into the Interoperability production.
+`SupportAgent.TicketService` is the programmatic entry point into the Interoperability production.
 
 The service:
 
@@ -227,22 +364,32 @@ The service:
 4. Receives a `SupportAgent.ResolutionResponse`.
 5. Returns the resolution JSON to the CLI.
 
+The service does not use a polling inbound adapter. It is invoked programmatically by the CLI.
+
 ### Business Process
 
 `SupportAgent.ResolutionProcess` invokes `solver.process_ticket()` through Embedded Python.
 
-The process runs the AI-assisted investigation and returns the validated result.
+The process runs the documentation-assisted investigation and returns the validated result.
 
 ### Python solver
 
-The Python implementation is divided into four focused modules:
+The core implementation is divided into focused modules:
 
 | Module | Responsibility |
 |---|---|
-| `solver.py` | Public entry point and workflow coordination |
-| `agent.py` | IRIS AI Hub model execution and response parsing |
-| `policy.py` | Evidence validation, confidence, decisions, and result construction |
-| `validation.py` | Ticket parsing, normalisation, required fields, and injection checks |
+| `solver.py` | Public entry point, workflow coordination, documentation context, and evidence integration |
+| `agent.py` | IRIS AI Hub model execution, investigation instructions, and response parsing |
+| `policy.py` | Evidence validation, decision validation, diagnostic repair, and result construction |
+| `validation.py` | Ticket parsing, normalisation, required fields, limits, and injection checks |
+
+### Documentation package
+
+| Module | Responsibility |
+|---|---|
+| `documentation/client.py` | Safe read-only access to approved InterSystems documentation |
+| `documentation/index.py` | Bounded indexing, section extraction, SQLite FTS5 search, and query expansion |
+| `documentation/reranker.py` | AI Hub reranking, candidate validation, and local fallback |
 
 ### Setup
 
@@ -257,7 +404,7 @@ The model is loaded through the IRIS AI Hub Config Store.
 ## Prerequisites
 
 - Docker Desktop
-- Python 3
+- Python 3 available on the Windows `PATH`
 - Access to the required InterSystems Docker registry
 - InterSystems IRIS Community AI image
 - InterSystems `langchain_intersystems` wheel
@@ -320,7 +467,7 @@ docker compose ps
 
 Wait for `iris-ai-hub` to report `healthy`.
 
-## Persistent IRIS data
+## Persistent data
 
 Docker Compose uses the named volume:
 
@@ -336,13 +483,25 @@ The volume preserves:
 - IRIS Wallet entries
 - IRIS AI Hub configuration
 
+The generated documentation index is stored through the documentation data mount:
+
+```text
+data/documentation
+```
+
+The container uses:
+
+```text
+/opt/irisapp/data/documentation/docs.db
+```
+
 Do not run:
 
 ```cmd
 docker compose down -v
 ```
 
-The `-v` option deletes the persistent volume.
+The `-v` option deletes the persistent IRIS volume.
 
 ## Configure IRIS Resolve
 
@@ -418,6 +577,51 @@ Processes
 └── IRIS Resolve Process
 ```
 
+## Build the documentation index
+
+The documentation index is generated data and is not committed to Git.
+
+Run the bounded index build inside the container:
+
+```cmd
+docker exec iris-ai-hub sh -lc "cd /opt/irisapp/src/python && python3 -m documentation.index build --reset --max-pages 100 --max-depth 4 --delay 0.25"
+```
+
+Check the index:
+
+```cmd
+docker exec iris-ai-hub sh -lc "cd /opt/irisapp/src/python && python3 -m documentation.index status"
+```
+
+A representative index contains:
+
+```text
+100 pages
+493 sections
+```
+
+The exact count can change when the public documentation site changes.
+
+Test a local search:
+
+```cmd
+docker exec iris-ai-hub sh -lc "cd /opt/irisapp/src/python && python3 -m documentation.index search 'visual trace' --product 'InterSystems IRIS' --max-results 5"
+```
+
+Test the AI reranker:
+
+```cmd
+docker exec iris-ai-hub sh -lc "cd /opt/irisapp/src/python && python3 -m documentation.reranker 'business operation is not processing queued messages' --product 'InterSystems IRIS' --max-candidates 15 --max-selected 3"
+```
+
+A successful AI-assisted result includes:
+
+```json
+{
+  "reranking_method": "IRIS_AI_HUB"
+}
+```
+
 ## Run IRIS Resolve
 
 Start the CLI:
@@ -426,74 +630,68 @@ Start the CLI:
 python submit_ticket.py
 ```
 
-The CLI prompts for:
-
-- Ticket ID
-- Ticket title
-- Ticket description
-- Optional CCR reference
-- Application or product
-- Site or customer
-- IRIS namespace
-- Affected identifier
-- Expected interface or message type
-- Relevant timestamp or time range
-- Optional technical evidence
-- Affected environment
+The normal ticket workflow does not require the Windows virtual environment because the AI, InterSystems integration, documentation search, and reranker execute inside Docker.
 
 Enter `END` on a new line to finish a multiline field.
 
 ## Demonstration
 
-The following synthetic example produces a supported resolution:
+The following synthetic example tests documentation-assisted queue diagnostics:
 
 ```text
-Ticket ID: SIMPLIFIED-RESOLUTION-001
+Ticket ID:
+TEST-DOCS-002
+
 Ticket title:
-Rescheduled appointment lost the order association required for Patient Hub
-messaging
+Business operation is not processing queued messages
 
 Ticket description:
-A rescheduled TrakCare appointment did not generate the expected Patient Hub
-message.
-
-A read-only comparison of the original appointment, rescheduled appointment,
-and a successful equivalent appointment has been completed.
+The affected interoperability production and namespace have been confirmed.
+Messages are visible with Queued status for the business operation, but the
+queue is not reducing. No configuration changes or message resends have been
+performed.
 END
 
-CCR ID:
+CCR ID, if applicable:
 
-Application or product: TrakCare T2024
-Site or customer: Synthetic demonstration
-IRIS namespace: DEMO-TEST
-Affected identifier: Appointments DEMO-111111 and DEMO-654321
-Expected interface or message type: Appointment message to Patient Hub
-Relevant timestamp or time range:
-Appointment rescheduled at 10:15; trace reviewed from 10:00 to 10:30
+Application or product:
+InterSystems IRIS
 
-Additional evidence:
-The original appointment DEMO-111111 links to order DEMO-ORDER-001.
-The rescheduled appointment DEMO-654321 has an empty order-link field.
-The order remains linked to the original appointment.
-No Patient Hub message was generated for DEMO-654321.
-A successful equivalent appointment has a valid order link and generated the
-expected message.
-The missing order association was the only material difference found.
-No data or configuration was changed.
+Site or customer:
+Synthetic Test Site
+
+IRIS namespace:
+USER
+
+Additional information and evidence:
+Message ID TEST-MESSAGE-001 is queued for the outbound interoperability
+interface. The relevant period is 6 November 2026 from 14:00 to 15:00 GMT.
+The production is running and the business operation is enabled, but the queue
+is not reducing. No resend, replay, purge, restart, or configuration change has
+been attempted.
 END
 
-Affected environment: TEST
+Affected environment:
+TEST
 ```
 
 A representative result is:
 
 ```text
-Decision:              PROPOSE_RESOLUTION
-Confidence:            100%
+Status:                COMPLETED
+Decision:              PROPOSE_DIAGNOSTICS
 Manual evidence:       Yes
 Human approval:        Yes
 Automatic changes:     No
 ```
+
+The result can include:
+
+- User-supplied evidence
+- Selected official InterSystems documentation
+- Read-only queue and job diagnostics
+- Risks and limitations
+- Controlled investigation areas
 
 ## Inspect the Interoperability messages
 
@@ -517,22 +715,37 @@ IRIS Resolve Process
 
 The first message contains the ticket request.
 
-The second message contains the complete structured AI result.
+The second message contains the complete structured result.
 
-Open the session in Visual Trace to inspect the full request and response path.
+Open the session in Visual Trace to inspect the request and response path.
 
 ## Example structured result
 
 ```json
 {
-  "decision": "PROPOSE_RESOLUTION",
-  "confidence": 1.0,
-  "confidence_percent": 100,
-  "root_cause_supported": true,
+  "decision": "PROPOSE_DIAGNOSTICS",
+  "root_cause_supported": false,
+  "evidence": [
+    {
+      "evidence_id": "USER-PROVIDED-EVIDENCE",
+      "source": "USER_SUPPLIED_EVIDENCE",
+      "finding": "The user reports that the affected message remains queued."
+    },
+    {
+      "evidence_id": "ISC-SECTION-E8ED339AD064D20A",
+      "source": "INTERSYSTEMS_DOCUMENTATION",
+      "finding": "Explains jobs, pools, and message queues for interoperability business hosts."
+    }
+  ],
+  "recommended_actions": [
+    "Record the affected business operation's queue depth and job status.",
+    "Check whether a job is available in the business operation's pool.",
+    "Review the Event Log for errors during the supplied time range."
+  ],
   "investigation_areas": [
     "MANUAL_EVIDENCE",
-    "OUTBOUND_TRACE",
-    "ENVIRONMENT"
+    "ENVIRONMENT",
+    "OUTBOUND_TRACE"
   ],
   "user_evidence_supplied": true,
   "requires_human_approval": true,
@@ -547,10 +760,13 @@ Open the session in Visual Trace to inspect the full request and response path.
 - Never commit or share an Amazon Bedrock API key.
 - Store model credentials in the IRIS Wallet.
 - Rotate exposed credentials.
-- Treat ticket content as untrusted input.
+- Treat ticket content and documentation text as untrusted input.
 - Use synthetic or anonymised demonstrations.
 - Do not include patient-identifiable information.
-- Review every recommendation before applying a change.
+- Do not include credentials in tickets, logs, prompts, screenshots, or documentation queries.
+- Review every recommendation before applying any change.
+- Do not expose index building as an agent-callable tool.
+- Do not permit arbitrary URLs, HTTP methods, SQL, shell commands, or database writes through documentation tools.
 
 ## Licence
 
