@@ -67,3 +67,17 @@ $RECYCLE.BIN/
 # Linux
 *~
 .nfs*
+
+# Generated InterSystems documentation index
+data/documentation/docs.db
+data/documentation/docs.db-shm
+data/documentation/docs.db-wal
+
+# Documentation prototype
+docs-prototype/.venv/
+docs-prototype/__pycache__/
+docs-prototype/.pytest_cache/
+
+# Python caches
+__pycache__/
+*.pycdocs-prototype/

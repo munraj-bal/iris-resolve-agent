@@ -1,8 +1,6 @@
 Class SupportAgent.TicketService Extends Ens.BusinessService
 {
 
-Parameter ADAPTER = "Ens.InboundAdapter";
-
 Method OnProcessInput(
     pInput As SupportAgent.TicketRequest,
     Output pOutput As SupportAgent.ResolutionResponse

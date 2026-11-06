@@ -1,1 +1,3 @@
 langchain-aws
+beautifulsoup4>=4.12,<5
+httpx>=0.27,<1

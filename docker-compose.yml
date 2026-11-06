@@ -11,6 +11,7 @@ services:
     environment:
       IRIS_PASSWORD: "${IRIS_PASSWORD}"
       PYTHONPATH: "/opt/irisapp/python-packages:/opt/irisapp/src/python"
+      DOCS_DATABASE_PATH: /opt/irisapp/data/documentation/docs.db
 
     ports:
       - "9091:1972"
@@ -19,6 +20,7 @@ services:
     volumes:
       - ./src:/opt/irisapp/src
       - iris-mgr:/usr/irissys/mgr
+      - ./data/documentation:/opt/irisapp/data/documentation
 
 volumes:
   iris-mgr:

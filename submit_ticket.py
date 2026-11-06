@@ -19,18 +19,6 @@ OPTIONAL_FIELDS: Final[tuple[tuple[str, str], ...]] = (
     ),
     ("site", "Site or customer"),
     ("iris_namespace", "IRIS namespace"),
-    (
-        "affected_identifier",
-        "Affected episode, appointment, order, or message ID",
-    ),
-    (
-        "expected_interface",
-        "Expected interface or message type",
-    ),
-    (
-        "relevant_time",
-        "Relevant timestamp or time range",
-    ),
 )
 
 REVIEW_LABELS: Final[tuple[tuple[str, str], ...]] = (
@@ -41,9 +29,6 @@ REVIEW_LABELS: Final[tuple[tuple[str, str], ...]] = (
     ("application", "Application"),
     ("site", "Site"),
     ("iris_namespace", "Namespace"),
-    ("affected_identifier", "Affected identifier"),
-    ("expected_interface", "Expected interface"),
-    ("relevant_time", "Relevant time"),
 )
 
 
@@ -131,12 +116,20 @@ def create_payload() -> dict[str, str]:
         }
     )
 
+    # Preserve the existing ticket schema without prompting separately.
+    # Users can include these details in additional_information.
+    payload["affected_identifier"] = ""
+    payload["expected_interface"] = ""
+    payload["relevant_time"] = ""
+
     payload["additional_evidence"] = prompt_multiline(
-        "Additional evidence, if available",
+        "Additional information and evidence",
         (
-            "Paste traces, transport logs, Find GUID output, "
-            "SQL results, errors, configuration details, "
-            "comparison cases, or investigation notes. "
+            "Include any affected episode, appointment, order, event or "
+            "message identifiers; expected interface or message type; "
+            "relevant timestamps or time ranges; traces; transport logs; "
+            "Find GUID output; SQL results; errors; configuration details; "
+            "comparison cases; or investigation notes. "
             "Enter END immediately to skip."
         ),
     )
@@ -165,7 +158,7 @@ def confirm_submission(
     print("\nDescription:")
     print(payload["description"])
 
-    print("\nAdditional evidence:")
+    print("\nAdditional information and evidence:")
     print(
         payload["additional_evidence"]
         or "No additional evidence supplied."
@@ -315,10 +308,6 @@ def display_result(
             "Preliminary decision",
             result.get("preliminary_agent_decision")
             or "None",
-        ),
-        (
-            "Confidence",
-            f"{result.get('confidence_percent', 0)}%",
         ),
         (
             "Manual evidence",

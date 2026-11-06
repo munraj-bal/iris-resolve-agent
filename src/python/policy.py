@@ -49,9 +49,6 @@ def base_result(
         **ticket,
         "decision": decision,
         "preliminary_agent_decision": None,
-        "confidence": 0.0,
-        "confidence_percent": 0,
-        "confidence_factors": {},
         "root_cause": "",
         "root_cause_supported": False,
         "reasoning": reasoning,
@@ -190,65 +187,149 @@ def validate_investigation_areas(
     ]
 
 
-def calculate_confidence(
+def infer_missing_information(
     ticket: dict[str, Any],
-    evidence_available: bool,
-    root_cause_supported: bool,
-    conflicting_evidence: bool,
-) -> tuple[float, dict[str, float]]:
-    """Calculate confidence from deterministic factors."""
-    factors = {
-        "ticket_title_present": (
-            0.10 if ticket.get("title") else 0.0
-        ),
-        "ticket_description_present": (
-            0.15 if ticket.get("description") else 0.0
-        ),
-        "environment_present": (
-            0.10 if ticket.get("environment") else 0.0
-        ),
-        "user_evidence_supplied": (
-            0.30 if evidence_available else 0.0
-        ),
-        "root_cause_supported": (
-            0.25 if root_cause_supported else 0.0
-        ),
-        "conflicting_evidence_absent": (
-            0.0 if conflicting_evidence else 0.10
-        ),
-    }
+) -> list[str]:
+    """Derive required investigation details from empty ticket fields."""
 
-    confidence = round(
-        min(sum(factors.values()), 1.0),
-        2,
+    missing: list[str] = []
+
+    field_rules = (
+        (
+            "namespace",
+            "Confirmed IRIS namespace.",
+        ),
+        (
+            "affected_identifier",
+            "Affected episode, appointment, order, event, or "
+            "message identifier.",
+        ),
+        (
+            "expected_interface",
+            "Expected interface, route, or message type.",
+        ),
+        (
+            "relevant_time",
+            "Relevant timestamp or time range, including timezone.",
+        ),
     )
 
-    return confidence, factors
+    for field_name, description in field_rules:
+        value = str(
+            ticket.get(field_name) or ""
+        ).strip()
+
+        if not value:
+            missing.append(description)
+
+    title_and_description = " ".join(
+        (
+            str(ticket.get("title") or ""),
+            str(ticket.get("description") or ""),
+        )
+    ).lower()
+
+    if "visual trace" in title_and_description:
+        missing.extend(
+            [
+                "Confirmed interoperability production name.",
+                "Visual Trace search filters and session criteria used.",
+                "Installed InterSystems IRIS product version.",
+            ]
+        )
+
+    if "ccr" in title_and_description:
+        missing.extend(
+            [
+                "Verified CCR contents and prerequisite relationships.",
+                "Current transport and deployment state of each "
+                "related CCR.",
+            ]
+        )
+
+    return list(dict.fromkeys(missing))
 
 
-def select_decision(
-    preliminary: str,
-    confidence: float,
-    evidence_count: int,
-) -> str:
-    """Apply deterministic decision thresholds."""
-    if preliminary in {
-        "REJECT",
-        "REQUEST_INFORMATION",
-        "NEEDS_INVESTIGATION",
-    }:
-        return preliminary
+def infer_diagnostic_actions(
+    ticket: dict[str, Any],
+    investigation_areas: list[str],
+) -> list[str]:
+    """Create safe read-only diagnostics for known investigation areas."""
 
-    if confidence >= 0.85 and evidence_count > 0:
-        return "PROPOSE_RESOLUTION"
+    actions: list[str] = []
 
-    if confidence >= 0.65 and evidence_count > 0:
-        return "PROPOSE_DIAGNOSTICS"
+    areas = {
+        str(area).strip().upper()
+        for area in investigation_areas
+    }
 
-    if confidence >= 0.40:
-        return "REQUEST_INFORMATION"
+    ticket_text = " ".join(
+        (
+            str(ticket.get("title") or ""),
+            str(ticket.get("description") or ""),
+            str(ticket.get("additional_evidence") or ""),
+        )
+    ).lower()
 
-    return "NEEDS_INVESTIGATION"
+    if (
+        "queue" in ticket_text
+        or "queued" in ticket_text
+    ):
+        actions.extend(
+            [
+                "Open the Production Monitor and record the affected "
+                "business operation's queue depth and job status.",
+                "Check whether a job is available in the business "
+                "operation's private or actor pool.",
+                "Review the Event Log for errors from the affected "
+                "business operation during the supplied time range.",
+                "Compare the queue depth at two points in time to determine "
+                "whether the queue is static, increasing, or draining slowly.",
+                "Inspect the oldest queued message read-only to identify its "
+                "status, target, creation time, and any recorded error.",
+            ]
+        )
+
+    if "OUTBOUND_TRACE" in areas and not (
+        "queue" in ticket_text
+        or "queued" in ticket_text
+    ):
+        actions.extend(
+            [
+                "Confirm the IRIS namespace and interoperability "
+                "production before searching messages.",
+                "Confirm the source event or message identifier and "
+                "the relevant timestamp range, including timezone.",
+                "Review Message Viewer and Visual Trace using the "
+                "confirmed identifiers, session, filters, and time range.",
+                "Review the Event Log for errors at the earliest point "
+                "where the expected message flow diverges.",
+            ]
+        )
+
+    if "FIND_GUID" in areas:
+        actions.append(
+            "Run Find GUID for each missing reference in the relevant "
+            "source and target environments and record the owning item."
+        )
+
+    if "CCR_TRANSPORT" in areas:
+        actions.extend(
+            [
+                "Review the read-only transport history and current "
+                "state of each related CCR.",
+                "Compare the recorded CCR prerequisites with the "
+                "contents and expected deployment sequence.",
+            ]
+        )
+
+    if "ENVIRONMENT" in areas:
+        actions.append(
+            "Verify the affected environment, namespace, product "
+            "version, and configuration scope."
+        )
+
+    return list(dict.fromkeys(actions))
 
 
 def validate_agent_result(
@@ -256,6 +337,7 @@ def validate_agent_result(
     agent_result: dict[str, Any],
 ) -> dict[str, Any]:
     """Validate model output and select the final decision."""
+
     preliminary = str(
         agent_result.get("decision")
         or "NEEDS_INVESTIGATION"
@@ -264,13 +346,13 @@ def validate_agent_result(
     if preliminary not in ALLOWED_DECISIONS:
         preliminary = "NEEDS_INVESTIGATION"
 
-    evidence_available = bool(
+    user_evidence_available = bool(
         ticket.get("additional_evidence")
     )
 
     evidence = validate_evidence(
         agent_result.get("evidence"),
-        evidence_available,
+        user_evidence_available,
     )
 
     root_cause = normalise_text(
@@ -279,7 +361,8 @@ def validate_agent_result(
     )
 
     root_cause_supported = bool(
-        root_cause
+        preliminary == "PROPOSE_RESOLUTION"
+        and root_cause
         and agent_result.get("root_cause_supported") is True
         and evidence
     )
@@ -292,43 +375,99 @@ def validate_agent_result(
         agent_result.get("investigation_areas")
     )
 
-    confidence, factors = calculate_confidence(
-        ticket,
-        evidence_available,
-        root_cause_supported,
-        conflicting_evidence,
-    )
-
-    decision = select_decision(
-        preliminary,
-        confidence,
-        len(evidence),
-    )
-
     recommended_actions = normalise_string_list(
         agent_result.get("recommended_actions")
     )
 
+    missing_information = normalise_string_list(
+        agent_result.get("missing_information")
+    )
+
+    risks = normalise_string_list(
+        agent_result.get("risks")
+    )
+
+    decision = preliminary
+
+    # A resolution cannot be proposed unless the root cause is directly
+    # supported by supplied evidence.
+    if (
+        decision == "PROPOSE_RESOLUTION"
+        and not root_cause_supported
+    ):
+        decision = "NEEDS_INVESTIGATION"
+
+        if not missing_information:
+            missing_information.append(
+                "Evidence directly supporting the proposed root cause "
+                "and resolution."
+            )
+
+    # A request for information must specify the required information.
+    if decision == "REQUEST_INFORMATION":
+        if not missing_information:
+            missing_information = (
+                infer_missing_information(ticket)
+            )
+
+        if not missing_information:
+            missing_information = [
+                "The identifiers, timestamps, search scope, and "
+                "supporting evidence required to continue the "
+                "investigation."
+            ]
+
+        root_cause = ""
+        root_cause_supported = False
+
+    # A diagnostic proposal must contain at least one read-only action.
+    if decision == "PROPOSE_DIAGNOSTICS":
+        if not recommended_actions:
+            recommended_actions = (
+                infer_diagnostic_actions(
+                    ticket,
+                    investigation_areas,
+                )
+            )
+
+        if not recommended_actions:
+            recommended_actions = [
+                "Review the relevant read-only logs, identifiers, "
+                "timestamps, configuration, and comparison evidence "
+                "before proposing a resolution."
+            ]
+
+        if not root_cause_supported:
+            root_cause = ""
+
+    # An unresolved investigation must state what remains unresolved.
+    if decision == "NEEDS_INVESTIGATION":
+        if not missing_information:
+            missing_information = (
+                infer_missing_information(ticket)
+            )
+
+        if not missing_information:
+            missing_information = [
+                "Additional verified evidence is required to "
+                "determine the earliest point of divergence and "
+                "support a root cause."
+            ]
+
+        root_cause = ""
+        root_cause_supported = False
+
+    # Rejected requests must not contain operational instructions.
     if decision == "REJECT":
+        root_cause = ""
+        root_cause_supported = False
         recommended_actions = []
         investigation_areas = []
-
-    if decision in {
-        "REQUEST_INFORMATION",
-        "NEEDS_INVESTIGATION",
-        "REJECT",
-    } and not root_cause_supported:
-        root_cause = ""
 
     return {
         **ticket,
         "decision": decision,
         "preliminary_agent_decision": preliminary,
-        "confidence": confidence,
-        "confidence_percent": round(
-            confidence * 100
-        ),
-        "confidence_factors": factors,
         "root_cause": root_cause,
         "root_cause_supported": root_cause_supported,
         "reasoning": normalise_text(
@@ -337,15 +476,11 @@ def validate_agent_result(
         ),
         "evidence": evidence,
         "recommended_actions": recommended_actions,
-        "missing_information": normalise_string_list(
-            agent_result.get("missing_information")
-        ),
-        "risks": normalise_string_list(
-            agent_result.get("risks")
-        ),
+        "missing_information": missing_information,
+        "risks": risks,
         "investigation_areas": investigation_areas,
         "conflicting_evidence": conflicting_evidence,
-        "user_evidence_supplied": evidence_available,
+        "user_evidence_supplied": user_evidence_available,
         "requires_human_approval": True,
         "automatic_changes_performed": False,
         "status": "COMPLETED",
