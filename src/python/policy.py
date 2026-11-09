@@ -7,6 +7,7 @@ from typing import Any, Final
 from validation import (
     normalise_string_list,
     normalise_text,
+    normalise_item_list,
 )
 
 
@@ -375,12 +376,12 @@ def validate_agent_result(
         agent_result.get("investigation_areas")
     )
 
-    recommended_actions = normalise_string_list(
-        agent_result.get("recommended_actions")
+    recommended_actions = normalise_item_list(
+        agent_result.get("recommended_actions"), "action", "purpose"
     )
 
-    missing_information = normalise_string_list(
-        agent_result.get("missing_information")
+    missing_information = normalise_item_list(
+        agent_result.get("missing_information"), "item", "reason"
     )
 
     risks = normalise_string_list(

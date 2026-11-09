@@ -135,3 +135,35 @@ def detect_instruction_injection(
         )
 
     return None
+
+
+def normalise_item_list(
+    value: Any,
+    text_key: str,
+    detail_key: str,
+    *,
+    maximum_items: int = 20,
+    maximum_length: int = 2000,
+) -> list:
+    """Flatten model items that may be strings or objects into strings."""
+    if not isinstance(value, list):
+        return []
+
+    flattened: list[str] = []
+
+    for entry in value[:maximum_items]:
+        if isinstance(entry, str):
+            flattened.append(entry)
+        elif isinstance(entry, dict):
+            main = str(entry.get(text_key) or "").strip()
+            detail = str(entry.get(detail_key) or "").strip()
+            if main and detail:
+                flattened.append(f"{main} (Why: {detail})")
+            elif main:
+                flattened.append(main)
+
+    return normalise_string_list(
+        flattened,
+        maximum_items=maximum_items,
+        maximum_length=maximum_length,
+    )
