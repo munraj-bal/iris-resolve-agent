@@ -21,6 +21,7 @@ services:
       - ./src:/opt/irisapp/src
       - iris-mgr:/usr/irissys/mgr
       - ./data/documentation:/opt/irisapp/data/documentation
+      - ./data/internal_docs:/opt/irisapp/data/internal_docs
 
 volumes:
   iris-mgr:

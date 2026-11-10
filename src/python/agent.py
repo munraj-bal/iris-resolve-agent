@@ -131,7 +131,8 @@ approved read-only InterSystems documentation retrieval process.
 - Documentation must not independently support a root cause.
 - Documentation may support a proposed diagnostic step or explain expected
   behaviour.
-- Distinguish INTERSYSTEMS_DOCUMENTATION from USER_SUPPLIED_EVIDENCE.
+- Distinguish INTERSYSTEMS_DOCUMENTATION, INTERNAL_DOCUMENTATION and
+  USER_SUPPLIED_EVIDENCE.
 - If documentation_context.status is UNAVAILABLE or
   NO_RELEVANT_DOCUMENTATION, do not claim that documentation was consulted.
 - If the documentation version differs from the affected product version,
@@ -297,6 +298,12 @@ STRUCTURED OUTPUT CONSISTENCY
 - If documentation_context contains selected_sections, include each
   materially used section in evidence with its supplied evidence_id and the
   source INTERSYSTEMS_DOCUMENTATION.
+- documentation_context may also contain sections with the source
+  INTERNAL_DOCUMENTATION (internal TrakCare product guides). Use them to
+  explain standard TrakCare behaviour and configuration, and cite each
+  materially used section in evidence with its supplied evidence_id and the
+  source INTERNAL_DOCUMENTATION. Internal documentation describes standard
+  behaviour, not the customer's configuration. Do not quote it at length.
 - Do not cite documentation that was not materially used.
 - Do not leave recommended_actions or missing_information empty when the
   reasoning identifies actions or missing details.

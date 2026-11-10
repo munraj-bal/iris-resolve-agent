@@ -72,6 +72,7 @@ $RECYCLE.BIN/
 data/documentation/docs.db
 data/documentation/docs.db-shm
 data/documentation/docs.db-wal
+data/internal_docs/
 
 # Documentation prototype
 docs-prototype/.venv/

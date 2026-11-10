@@ -8,6 +8,7 @@ import re
 import traceback
 
 from typing import Any
+from documentation.internal_search import search_internal
 
 from agent import DEFAULT_LLM_CONFIG, run_agent
 from documentation.reranker import rerank_documentation
@@ -131,14 +132,40 @@ def generic_documentation_question(
     ]
 
 
+def internal_sections(question: str) -> list[dict[str, Any]]:
+    """Return matching sections from the local internal documentation index."""
+
+    try:
+        matches = search_internal(question, limit=8)
+    except Exception as exc:
+        print(f"Internal documentation search failed: {exc}", flush=True)
+        return []
+
+    return [
+        {
+            "evidence_id": match["evidence_id"],
+            "source": "INTERNAL_DOCUMENTATION",
+            "title": match["title"],
+            "heading": match["section"],
+            "url": "",
+            "finding": match["text"],
+            "relevance": "",
+            "product": "TrakCare",
+            "version": "",
+        }
+        for match in matches
+    ]
+
+
 def documentation_context(
     ticket: dict[str, Any],
     llm_config_name: str,
 ) -> dict[str, Any]:
-    """Retrieve relevant official documentation safely."""
+    """Retrieve relevant official and internal documentation safely."""
 
     question = generic_documentation_question(ticket)
     product = documentation_product(ticket)
+    internal = internal_sections(question)
 
     try:
         result = rerank_documentation(
@@ -162,8 +189,8 @@ def documentation_context(
         return {
             "question": question,
             "product": product,
-            "status": "UNAVAILABLE",
-            "selected_sections": [],
+            "status": "AVAILABLE" if internal else "UNAVAILABLE",
+            "selected_sections": internal,
             "error": error_text,
         }
 
@@ -189,6 +216,8 @@ def documentation_context(
                 "version": section["version"],
             }
         )
+
+    selected_sections.extend(internal)
 
     return {
         "question": question,
@@ -278,7 +307,7 @@ def add_documentation_evidence(
         evidence.append(
             {
                 "evidence_id": evidence_id,
-                "source": "INTERSYSTEMS_DOCUMENTATION",
+                "source": section.get("source", "INTERSYSTEMS_DOCUMENTATION"),
                 "finding": (
                     section.get("relevance")
                     or (
